@@ -108,6 +108,39 @@ global.planConstruction = function(roomName) {
     return `Construction planning triggered for room ${roomName}`;
 };
 
+// Force construction site creation
+global.forceConstruction = function(roomName) {
+    const room = Game.rooms[roomName];
+    if (!room) {
+        return `No visibility in room ${roomName}`;
+    }
+    
+    const constructionManager = require('constructionManager');
+    
+    // Force run the construction manager with debug mode
+    console.log(`Forcing construction site creation in room ${roomName}`);
+    
+    // First check if we have any construction plans
+    if (!room.memory.construction || 
+        !room.memory.construction.roads || 
+        !room.memory.construction.roads.planned) {
+        console.log(`Room ${roomName} has no construction plans. Planning roads first...`);
+        constructionManager.planRoads(room);
+        return `Created road plans for room ${roomName}. Run this command again to create sites.`;
+    }
+    
+    // Force create construction sites with debug logging
+    const sites = room.find(FIND_CONSTRUCTION_SITES);
+    console.log(`Room ${roomName} currently has ${sites.length} construction sites`);
+    
+    // Directly call createConstructionSites with debug flag
+    constructionManager.createConstructionSitesDebug(room);
+    
+    // Count how many sites were created
+    const newSites = room.find(FIND_CONSTRUCTION_SITES);
+    return `Force created construction sites in ${roomName}. Sites before: ${sites.length}, after: ${newSites.length}`;
+};
+
 // Global error handler
 const errorHandler = function(error) {
     console.log(`UNCAUGHT EXCEPTION: ${error.stack || error}`);

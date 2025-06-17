@@ -795,6 +795,41 @@ const constructionManager = {
     },
     
     /**
+     * Create construction sites with debug logging
+     * @param {Room} room - The room to create construction sites in
+     */
+    createConstructionSitesDebug: function(room) {
+        console.log(`Starting debug construction site creation in room ${room.name}`);
+        
+        // Check if we have plans
+        if (!room.memory.construction) {
+            console.log(`No construction plans found for room ${room.name}`);
+            return;
+        }
+        
+        // Log planned structures
+        if (room.memory.construction.roads && room.memory.construction.roads.positions) {
+            console.log(`Found ${room.memory.construction.roads.positions.length} planned road positions`);
+        }
+        if (room.memory.construction.extensions && room.memory.construction.extensions.positions) {
+            console.log(`Found ${room.memory.construction.extensions.positions.length} planned extension positions`);
+        }
+        if (room.memory.construction.containers && room.memory.construction.containers.positions) {
+            console.log(`Found ${room.memory.construction.containers.positions.length} planned container positions`);
+        }
+        
+        // Force create sites
+        this.createConstructionSites(room);
+        
+        // Log results
+        const sites = room.find(FIND_CONSTRUCTION_SITES);
+        console.log(`After creation: ${sites.length} construction sites in room ${room.name}`);
+        sites.forEach(site => {
+            console.log(`- ${site.structureType} at (${site.pos.x},${site.pos.y}): ${site.progress}/${site.progressTotal}`);
+        });
+    },
+    
+    /**
      * Create construction sites based on plans
      * @param {Room} room - The room to create construction sites in
      */
@@ -849,27 +884,92 @@ const constructionManager = {
             const roadPositions = room.memory.construction.roads.positions;
             const newRoadPositions = [];
             
+            // Log the number of road positions to process
+            console.log(`Processing ${roadPositions.length} road positions in room ${room.name}`);
+            
+            // Track how many positions we've checked
+            let positionsChecked = 0;
+            let positionsSkipped = 0;
+            
             for (let i = 0; i < roadPositions.length && sitesPlaced < sitesToPlace; i++) {
+                positionsChecked++;
                 const pos = roadPositions[i];
+                
+                // Validate position
+                if (!pos || pos.x === undefined || pos.y === undefined) {
+                    console.log(`Invalid road position at index ${i}: ${JSON.stringify(pos)}`);
+                    continue;
+                }
+                
+                // Check if position is valid (within bounds)
+                if (pos.x < 0 || pos.x > 49 || pos.y < 0 || pos.y > 49) {
+                    console.log(`Road position out of bounds: (${pos.x},${pos.y})`);
+                    continue;
+                }
                 
                 // Check if there's already a road or construction site here
                 const roadKey = `${pos.x},${pos.y},${STRUCTURE_ROAD}`;
                 const hasRoad = structureMap.has(roadKey);
                 const hasRoadSite = siteMap.has(roadKey);
                 
-                // Create road construction site if needed
-                if (!hasRoad && !hasRoadSite) {
-                    const result = room.createConstructionSite(pos.x, pos.y, STRUCTURE_ROAD);
-                    if (result === OK) {
-                        sitesPlaced++;
+                // Skip if already built or under construction
+                if (hasRoad || hasRoadSite) {
+                    positionsSkipped++;
+                    // Keep this position in the plan if road doesn't exist yet
+                    if (!hasRoad) {
+                        newRoadPositions.push(pos);
+                    }
+                    continue;
+                }
+                
+                // Check for any other structures or sites at this position
+                const lookResult = room.lookAt(pos.x, pos.y);
+                let hasStructure = false;
+                
+                for (const item of lookResult) {
+                    if (item.type === LOOK_STRUCTURES || item.type === LOOK_CONSTRUCTION_SITES) {
+                        hasStructure = true;
+                        break;
                     }
                 }
                 
-                // Keep this position in the plan if road doesn't exist yet
-                if (!hasRoad) {
-                    newRoadPositions.push(pos);
+                if (hasStructure) {
+                    positionsSkipped++;
+                    continue;
                 }
+                
+                // Create road construction site
+                try {
+                    const result = room.createConstructionSite(pos.x, pos.y, STRUCTURE_ROAD);
+                    if (result === OK) {
+                        sitesPlaced++;
+                        console.log(`Created road construction site at (${pos.x},${pos.y})`);
+                        
+                        // Add to site map to prevent duplicates
+                        siteMap.set(roadKey, true);
+                    } else {
+                        console.log(`Failed to create road construction site at (${pos.x},${pos.y}), result: ${result}`);
+                        
+                        // Common error codes:
+                        // ERR_INVALID_TARGET = -7
+                        // ERR_FULL = -8 (too many construction sites)
+                        // ERR_RCL_NOT_ENOUGH = -14
+                        
+                        if (result === ERR_FULL) {
+                            console.log(`Construction site limit reached (${sitesPlaced} placed)`);
+                            break;
+                        }
+                    }
+                } catch (e) {
+                    console.log(`Exception creating road site at (${pos.x},${pos.y}): ${e}`);
+                }
+                
+                // Keep this position in the plan for next time
+                newRoadPositions.push(pos);
             }
+            
+            // Log summary
+            console.log(`Road positions: ${positionsChecked} checked, ${positionsSkipped} skipped, ${sitesPlaced} sites placed`);
             
             // Update road positions in memory
             room.memory.construction.roads.positions = newRoadPositions;
