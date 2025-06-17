@@ -132,21 +132,49 @@ const roleHarvester = {
             return;
         }
         
+        // Check for source keepers near the source
+        if (Game.time % 10 === 0) { // Only check occasionally to save CPU
+            const sourcePos = new RoomPosition(
+                source.pos.x, 
+                source.pos.y, 
+                source.pos.roomName
+            );
+            
+            if (!utils.isSafeFromKeepers(sourcePos)) {
+                // Source is near a keeper, release it and find a new one
+                utils.logError(`harvester_keeper_${creep.name}`, 
+                    `Source ${source.id} is near a Source Keeper, abandoning`, 200);
+                    
+                roomManager.releaseSource(creep.memory.sourceId, creep.memory.homeRoom);
+                creep.memory.sourceId = null;
+                
+                // Move to safety
+                const spawn = creep.room.find(FIND_MY_SPAWNS)[0];
+                if (spawn) creep.moveTo(spawn, { reusePath: 5 });
+                return;
+            }
+        }
+        
         // Move to source and harvest
         const harvestResult = creep.harvest(source);
         if (harvestResult === ERR_NOT_IN_RANGE) {
-            // Use cached position if available
+            // Check if path to source is safe
             if (creep.memory.sourcePos) {
-                creep.moveTo(
-                    new RoomPosition(
-                        creep.memory.sourcePos.x,
-                        creep.memory.sourcePos.y,
-                        creep.memory.sourcePos.roomName
-                    ),
-                    { reusePath: 30 } // Reuse path for longer since harvesters are static
+                const targetPos = new RoomPosition(
+                    creep.memory.sourcePos.x,
+                    creep.memory.sourcePos.y,
+                    creep.memory.sourcePos.roomName
                 );
+                
+                creep.moveTo(targetPos, { 
+                    reusePath: 30, // Reuse path for longer since harvesters are static
+                    visualizePathStyle: {stroke: '#ffaa00'}
+                });
             } else {
-                creep.moveTo(source, { reusePath: 30 });
+                creep.moveTo(source, { 
+                    reusePath: 30,
+                    visualizePathStyle: {stroke: '#ffaa00'}
+                });
             }
         }
     },

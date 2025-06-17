@@ -13,18 +13,33 @@ const defenseManager = {
         // Skip if we don't own the controller
         if (!room.controller || !room.controller.my) return;
         
-        // Check for hostiles - this is a critical operation
+        // Check for source keepers
+        const hasKeepers = this.hasSourceKeepers(room);
+        
+        // Check for hostiles (excluding source keepers)
         const hostiles = this.getHostiles(room);
         
         // Update room memory with hostile information
         room.memory.defense = room.memory.defense || {};
         room.memory.defense.hostileCount = hostiles.length;
+        room.memory.defense.hasSourceKeepers = hasKeepers;
         room.memory.defense.lastHostileCheck = Game.time;
+        
+        // Handle source keeper rooms differently
+        if (hasKeepers && !room.memory.defense.keeperWarningIssued) {
+            console.log(`⚠️ NOTICE: Room ${room.name} contains Source Keepers. Avoid until properly equipped.`);
+            room.memory.defense.keeperWarningIssued = Game.time;
+            
+            // Mark sources near keepers as dangerous
+            if (!room.memory.defense.keeperSourcesMarked) {
+                this.markKeeperSources(room);
+            }
+        }
         
         // If no hostiles, nothing more to do
         if (hostiles.length === 0) {
             if (room.memory.defense.threatLevel) {
-                console.log(`Room ${room.name} is now safe.`);
+                console.log(`Room ${room.name} is now safe from player threats.`);
                 room.memory.defense.threatLevel = 0;
             }
             return;
@@ -74,7 +89,22 @@ const defenseManager = {
      * @returns {Array} - Array of hostile creeps
      */
     getHostiles: function(room) {
-        return room.find(FIND_HOSTILE_CREEPS);
+        return room.find(FIND_HOSTILE_CREEPS, {
+            filter: creep => creep.owner.username !== 'Source Keeper'
+        });
+    },
+    
+    /**
+     * Check if room has source keepers
+     * @param {Room} room - The room to check
+     * @returns {boolean} - True if room has source keepers
+     */
+    hasSourceKeepers: function(room) {
+        const keepers = room.find(FIND_HOSTILE_CREEPS, {
+            filter: creep => creep.owner.username === 'Source Keeper'
+        });
+        
+        return keepers.length > 0;
     },
     
     /**
@@ -169,6 +199,42 @@ const defenseManager = {
     alertNearbyRooms: function(room) {
         // This would be expanded in a multi-room setup
         console.log(`⚠️ ALERT: Room ${room.name} under attack! Threat level: ${room.memory.defense.threatLevel}`);
+    },
+    
+    /**
+     * Mark sources near keepers as dangerous
+     * @param {Room} room - The room to check
+     */
+    markKeeperSources: function(room) {
+        // Find all source keepers
+        const keepers = room.find(FIND_HOSTILE_CREEPS, {
+            filter: creep => creep.owner.username === 'Source Keeper'
+        });
+        
+        if (keepers.length === 0) return;
+        
+        // Find all sources
+        const sources = room.find(FIND_SOURCES);
+        
+        // Mark sources that are near keepers
+        for (const source of sources) {
+            let isNearKeeper = false;
+            
+            for (const keeper of keepers) {
+                if (source.pos.getRangeTo(keeper) <= 5) {
+                    isNearKeeper = true;
+                    break;
+                }
+            }
+            
+            // Update source memory
+            if (!room.memory.sources) room.memory.sources = {};
+            if (!room.memory.sources[source.id]) room.memory.sources[source.id] = {};
+            
+            room.memory.sources[source.id].nearKeeper = isNearKeeper;
+        }
+        
+        room.memory.defense.keeperSourcesMarked = true;
     }
 };
 

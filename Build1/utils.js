@@ -234,6 +234,34 @@ const utils = {
             console.log(`ERROR [${key}]: ${message}`);
             global.errorLog[key] = now;
         }
+    },
+    
+    /**
+     * Check if a position is safe from source keepers
+     * @param {RoomPosition} pos - Position to check
+     * @param {number} safeDistance - Safe distance from keepers (default: 5)
+     * @returns {boolean} - True if position is safe
+     */
+    isSafeFromKeepers: function(pos, safeDistance = 5) {
+        if (!pos || !pos.roomName) return false;
+        
+        const room = Game.rooms[pos.roomName];
+        if (!room) return true; // Assume safe if room not visible
+        
+        const keepers = room.find(FIND_HOSTILE_CREEPS, {
+            filter: creep => creep.owner.username === 'Source Keeper'
+        });
+        
+        if (keepers.length === 0) return true;
+        
+        // Check distance to each keeper
+        for (const keeper of keepers) {
+            if (pos.getRangeTo(keeper) <= safeDistance) {
+                return false;
+            }
+        }
+        
+        return true;
     }
 };
 

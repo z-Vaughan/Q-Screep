@@ -257,6 +257,9 @@ const roomManager = {
             // Skip sources that are already at capacity
             if (sourceMemory.assignedHarvesters >= sourceMemory.availableSpots) continue;
             
+            // Skip sources near source keepers
+            if (sourceMemory.nearKeeper === true) continue;
+            
             // Calculate ratio of assigned harvesters to available spots
             const ratio = sourceMemory.assignedHarvesters / sourceMemory.availableSpots;
             
