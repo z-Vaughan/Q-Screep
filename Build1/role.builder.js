@@ -74,35 +74,53 @@ const roleBuilder = {
                 };
             }
             
+            // Validate target before interacting
+            if (!this.isValidTarget(target)) {
+                console.log(`Builder ${creep.name} has invalid target ${target.id}, finding new target`);
+                delete creep.memory.targetId;
+                delete creep.memory.targetPos;
+                return;
+            }
+            
             // Perform action based on target type
             let actionResult;
             
-            if (target.progressTotal !== undefined) {
-                // Construction site
-                actionResult = creep.build(target);
-            } else if (target.structureType === STRUCTURE_CONTROLLER) {
-                // Controller
-                actionResult = creep.upgradeController(target);
-            } else {
-                // Repair target
-                actionResult = creep.repair(target);
-            }
-            
-            if (actionResult === ERR_NOT_IN_RANGE) {
-                creep.moveTo(
-                    new RoomPosition(
-                        creep.memory.targetPos.x,
-                        creep.memory.targetPos.y,
-                        creep.memory.targetPos.roomName
-                    ),
-                    { 
-                        reusePath: 10,
-                        visualizePathStyle: {stroke: '#3333ff'}
-                    }
-                );
-            } else if (actionResult !== OK) {
-                // Log errors other than distance
-                console.log(`Builder ${creep.name} error: ${actionResult} when interacting with target ${target.id}`);
+            try {
+                if (target.progressTotal !== undefined) {
+                    // Construction site
+                    actionResult = creep.build(target);
+                } else if (target.structureType === STRUCTURE_CONTROLLER) {
+                    // Controller
+                    actionResult = creep.upgradeController(target);
+                } else {
+                    // Repair target
+                    actionResult = creep.repair(target);
+                }
+                
+                if (actionResult === ERR_NOT_IN_RANGE) {
+                    creep.moveTo(
+                        new RoomPosition(
+                            creep.memory.targetPos.x,
+                            creep.memory.targetPos.y,
+                            creep.memory.targetPos.roomName
+                        ),
+                        { 
+                            reusePath: 10,
+                            visualizePathStyle: {stroke: '#3333ff'}
+                        }
+                    );
+                } else if (actionResult === ERR_INVALID_TARGET) {
+                    console.log(`Builder ${creep.name} has invalid target ${target.id}, finding new target`);
+                    delete creep.memory.targetId;
+                    delete creep.memory.targetPos;
+                } else if (actionResult !== OK) {
+                    // Log errors other than distance
+                    console.log(`Builder ${creep.name} error: ${actionResult} when interacting with target ${target.id}`);
+                }
+            } catch (e) {
+                console.log(`Builder ${creep.name} exception: ${e} when interacting with target ${target.id}`);
+                delete creep.memory.targetId;
+                delete creep.memory.targetPos;
             }
         }
     },
@@ -125,18 +143,48 @@ const roleBuilder = {
             const sites = [];
             for (const id of constructionSiteIds) {
                 const site = Game.getObjectById(id);
-                if (site) {
+                if (site && site.progress < site.progressTotal) {
                     sites.push(site);
                 }
             }
             
             if (sites.length > 0) {
-                // Find closest site
-                target = this.findClosestByRange(creep, sites);
+                // Prioritize certain structure types
+                const priorityOrder = [STRUCTURE_SPAWN, STRUCTURE_EXTENSION, STRUCTURE_TOWER, STRUCTURE_CONTAINER, STRUCTURE_ROAD];
+                
+                // Sort sites by priority
+                sites.sort((a, b) => {
+                    const aPriority = priorityOrder.indexOf(a.structureType);
+                    const bPriority = priorityOrder.indexOf(b.structureType);
+                    
+                    // If both have a priority, use it
+                    if (aPriority !== -1 && bPriority !== -1) {
+                        return aPriority - bPriority;
+                    }
+                    
+                    // If only one has a priority, it comes first
+                    if (aPriority !== -1) return -1;
+                    if (bPriority !== -1) return 1;
+                    
+                    // Otherwise, sort by progress (prefer more complete structures)
+                    return (b.progress / b.progressTotal) - (a.progress / a.progressTotal);
+                });
+                
+                // Take the highest priority site that's closest
+                const highestPriority = sites[0].structureType;
+                const highPrioritySites = sites.filter(s => s.structureType === highestPriority);
+                
+                target = this.findClosestByRange(creep, highPrioritySites);
                 
                 if (target) {
-                    console.log(`Builder ${creep.name} found construction site at ${target.pos.x},${target.pos.y}`);
+                    console.log(`Builder ${creep.name} found ${target.structureType} construction site at ${target.pos.x},${target.pos.y}`);
                     return target;
+                }
+            } else {
+                // If we had IDs but no valid sites, update the room manager
+                if (creep.room.memory.constructionSiteIds) {
+                    creep.room.memory.constructionSiteIds = [];
+                    creep.room.memory.constructionSites = 0;
                 }
             }
         }
@@ -286,6 +334,36 @@ const roleBuilder = {
         }
         
         return source;
+    },
+    
+    /**
+     * Check if a target is valid for builder interaction
+     * @param {Object} target - The target to validate
+     * @returns {boolean} - Whether the target is valid
+     */
+    isValidTarget: function(target) {
+        if (!target) return false;
+        
+        // Check if target is a construction site
+        if (target.progressTotal !== undefined) {
+            // Valid if it's a construction site that's not complete
+            return target.progress < target.progressTotal;
+        }
+        
+        // Check if target is a controller
+        if (target.structureType === STRUCTURE_CONTROLLER) {
+            // Valid if it's a controller that we own
+            return target.my;
+        }
+        
+        // Check if target is a structure that needs repair
+        if (target.hits !== undefined && target.hitsMax !== undefined) {
+            // Valid if it's a structure that needs repair
+            return target.hits < target.hitsMax;
+        }
+        
+        // Not a valid target
+        return false;
     },
     
     /**
