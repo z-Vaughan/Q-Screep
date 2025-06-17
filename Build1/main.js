@@ -28,6 +28,29 @@ global.stats = {
 // Global utility functions
 global.utils = utils;
 
+// Special function for simulation rooms
+global.simConstruction = function() {
+    for (const roomName in Game.rooms) {
+        if (roomName.startsWith('sim')) {
+            console.log(`Forcing construction planning in simulation room ${roomName}`);
+            
+            // Reset construction plans
+            if (!Memory.rooms[roomName].construction) {
+                Memory.rooms[roomName].construction = {};
+            }
+            
+            Memory.rooms[roomName].construction.roads = { planned: false };
+            Memory.rooms[roomName].construction.extensions = { planned: false, count: 0 };
+            Memory.rooms[roomName].construction.containers = { planned: false };
+            
+            // Force run the construction manager
+            constructionManager.run(Game.rooms[roomName], true);
+        }
+    }
+    
+    return 'Simulation construction planning triggered';
+};
+
 // Global construction trigger function
 global.planConstruction = function(roomName) {
     const room = Game.rooms[roomName];

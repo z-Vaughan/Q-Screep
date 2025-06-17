@@ -158,6 +158,12 @@ const utils = {
         // Always execute critical operations
         if (priority === 'critical') return true;
         
+        // Check if we're in a simulation room
+        const isSimulation = Object.keys(Game.rooms).some(name => name.startsWith('sim'));
+        
+        // Always allow all operations in simulation rooms
+        if (isSimulation) return true;
+        
         // In emergency mode, only run critical operations
         if (global.emergencyMode) {
             if (global.emergencyMode.level === 'critical') {

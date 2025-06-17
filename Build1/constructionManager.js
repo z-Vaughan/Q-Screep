@@ -11,10 +11,13 @@ const constructionManager = {
     run: function(room, force = false) {
         const utils = require('utils');
         
-        // Only run every 100 ticks to save CPU - construction is not time-critical
-        // In emergency mode, run even less frequently
-        const interval = global.emergencyMode ? 
-            (global.emergencyMode.level === 'critical' ? 500 : 200) : 100;
+        // Check if we're in a simulation room
+        const isSimulation = room.name.startsWith('sim');
+        
+        // Run more frequently in simulation rooms
+        const interval = isSimulation ? 5 : // Every 5 ticks in simulation
+            (global.emergencyMode ? 
+                (global.emergencyMode.level === 'critical' ? 500 : 200) : 100);
             
         if (!force && Game.time % interval !== 0) return;
         
@@ -79,13 +82,24 @@ const constructionManager = {
         room.memory.construction.lastUpdate = Game.time;
         
         // Log construction status
-        if (force || Game.time % 100 === 0) {
+        const isSimulation = room.name.startsWith('sim');
+        if (force || Game.time % (isSimulation ? 20 : 100) === 0) {
             console.log(`Construction status for ${room.name}: ` +
                 `Roads: ${room.memory.construction.roads.planned ? 'Planned' : 'Not Planned'}, ` +
                 `Extensions: ${room.memory.construction.extensions.planned ? 'Planned' : 'Not Planned'}, ` +
                 `Containers: ${room.memory.construction.containers?.planned ? 'Planned' : 'Not Planned'}, ` +
                 `RCL: ${room.controller.level}`
             );
+            
+            // In simulation, log more detailed information
+            if (isSimulation) {
+                console.log(`Simulation construction details: ` +
+                    `Tick: ${Game.time}, ` +
+                    `CPU Bucket: ${Game.cpu.bucket}, ` +
+                    `shouldExecute('low'): ${utils.shouldExecute('low')}, ` +
+                    `Construction sites: ${room.find(FIND_CONSTRUCTION_SITES).length}`
+                );
+            }
         }
     },
     
