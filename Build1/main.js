@@ -133,8 +133,8 @@ global.forceConstruction = function(roomName) {
     const sites = room.find(FIND_CONSTRUCTION_SITES);
     console.log(`Room ${roomName} currently has ${sites.length} construction sites`);
     
-    // Directly call createConstructionSites with debug flag
-    constructionManager.createConstructionSitesDebug(room);
+    // Directly call createConstructionSites
+    constructionManager.createConstructionSites(room);
     
     // Count how many sites were created
     const newSites = room.find(FIND_CONSTRUCTION_SITES);

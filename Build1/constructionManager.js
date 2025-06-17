@@ -727,6 +727,21 @@ const constructionManager = {
         // Find all construction sites in the room
         const sites = room.find(FIND_CONSTRUCTION_SITES);
         
+        // Log construction site count every 20 ticks
+        if (Game.time % 20 === 0) {
+            const sitesByType = {};
+            for (const site of sites) {
+                sitesByType[site.structureType] = (sitesByType[site.structureType] || 0) + 1;
+            }
+            
+            let siteInfo = '';
+            for (const type in sitesByType) {
+                siteInfo += `${sitesByType[type]} ${type} `;
+            }
+            
+            console.log(`Room ${room.name} construction: ${sites.length} sites - ${siteInfo}`);
+        }
+        
         // Update room memory
         room.memory.constructionSites = sites.length;
         room.memory.constructionSiteIds = sites.map(site => site.id);
