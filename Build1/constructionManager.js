@@ -95,6 +95,7 @@ const constructionManagerImpl = {
         room.memory.construction.lastUpdate = Game.time;
         
         // Log construction status
+        /*
         if (force || Game.time % (isSimulation ? 20 : 100) === 0) {
             console.log(`Construction status for ${room.name}: ` +
                 `Roads: ${room.memory.construction.roads.planned ? 'Planned' : 'Not Planned'}, ` +
@@ -113,6 +114,7 @@ const constructionManagerImpl = {
                 );
             }
         }
+        */
     },
     
     /**
@@ -600,7 +602,7 @@ const constructionManagerImpl = {
         const sites = room.find(FIND_CONSTRUCTION_SITES);
         
         // Log construction site count every 20 ticks
-        if (Game.time % 20 === 0) {
+        if (Game.time % 50 === 0) {
             const sitesByType = {};
             for (const site of sites) {
                 sitesByType[site.structureType] = (sitesByType[site.structureType] || 0) + 1;
