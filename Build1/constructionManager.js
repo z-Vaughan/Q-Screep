@@ -2,7 +2,10 @@
  * Construction Manager - Handles structure placement and construction planning
  * CPU optimized for maximum efficiency
  */
-const constructionManager = {
+const utils = require('utils');
+
+// Original module implementation
+const constructionManagerImpl = {
     /**
      * Run the construction manager for a room
      * @param {Room} room - The room to manage construction for
@@ -983,5 +986,33 @@ const constructionManager = {
         }
     }
 };
+
+// Wrap the module with error handling
+const constructionManager = utils.wrapModule(constructionManagerImpl, 'constructionManager');
+
+// Add debugging helper
+constructionManager.debugLastError = function() {
+    if (global.errors && global.errors.length > 0) {
+        const lastError = global.errors[global.errors.length - 1];
+        console.log(`Last error at tick ${lastError.time}:`);
+        console.log(`${lastError.module}.${lastError.method}: ${lastError.message}`);
+        console.log(`Stack: ${lastError.stack}`);
+        return lastError;
+    }
+    return 'No errors recorded';
+};
+
+// Check for missing methods that might be referenced
+const requiredMethods = [
+    'run', 'updateConstructionSiteCount', 'checkRoomEvolution', 
+    'planRoads', 'planContainers', 'planExtensions', 'planTowers', 'planStorage',
+    'findTowerPosition', 'findControllerContainerPosition', 'createConstructionSites'
+];
+
+for (const method of requiredMethods) {
+    if (typeof constructionManagerImpl[method] !== 'function') {
+        console.log(`WARNING: constructionManager is missing method: ${method}`);
+    }
+}
 
 module.exports = constructionManager;

@@ -240,7 +240,27 @@ module.exports.loop = function() {
         // Handle construction planning - run periodically regardless of CPU bucket
         if (Game.cpu.bucket > 3000 || currentTick % 10 === 0) {
             const constructionStart = Game.cpu.getUsed();
-            constructionManager.run(room);
+            try {
+                constructionManager.run(room);
+            } catch (error) {
+                console.log(`CRITICAL ERROR in constructionManager.run for room ${room.name}:`);
+                console.log(`Message: ${error.message || error}`);
+                console.log(`Stack: ${error.stack || 'No stack trace'}`);
+                
+                // Store detailed information about the room state for debugging
+                if (!global.debugInfo) global.debugInfo = {};
+                global.debugInfo.lastErrorRoom = {
+                    name: room.name,
+                    controller: room.controller ? {
+                        level: room.controller.level,
+                        my: room.controller.my
+                    } : null,
+                    memory: JSON.stringify(room.memory).substring(0, 1000),
+                    constructionMemory: room.memory.construction ? 
+                        JSON.stringify(room.memory.construction).substring(0, 500) : 'undefined',
+                    time: Game.time
+                };
+            }
             global.stats.cpu.construction += Game.cpu.getUsed() - constructionStart;
         }
     }

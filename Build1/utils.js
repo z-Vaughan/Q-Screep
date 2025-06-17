@@ -220,8 +220,64 @@ const utils = {
             return fn.apply(context, args);
         } catch (error) {
             console.log(`Error in safeExec: ${error}`);
+            console.log(`Stack trace: ${error.stack}`);
             return defaultValue;
         }
+    },
+    
+    /**
+     * Wrap a module's methods with error handling
+     * @param {Object} module - The module to wrap
+     * @param {string} moduleName - Name of the module for error reporting
+     * @returns {Object} - Wrapped module
+     */
+    wrapModule: function(module, moduleName) {
+        const wrapped = {};
+        
+        for (const key in module) {
+            if (typeof module[key] === 'function') {
+                wrapped[key] = function(...args) {
+                    try {
+                        return module[key].apply(module, args);
+                    } catch (error) {
+                        // Get detailed error information
+                        const errorInfo = {
+                            message: error.message || String(error),
+                            stack: error.stack,
+                            method: key,
+                            module: moduleName,
+                            args: args.map(arg => {
+                                if (arg && typeof arg === 'object') {
+                                    return arg.name || arg.id || JSON.stringify(arg).substring(0, 50);
+                                }
+                                return String(arg);
+                            })
+                        };
+                        
+                        // Log detailed error
+                        console.log(`ERROR in ${moduleName}.${key}: ${errorInfo.message}`);
+                        console.log(`Stack: ${errorInfo.stack}`);
+                        console.log(`Args: ${errorInfo.args.join(', ')}`);
+                        
+                        // Store error for debugging
+                        if (!global.errors) global.errors = [];
+                        global.errors.push({
+                            time: Game.time,
+                            ...errorInfo
+                        });
+                        
+                        // Keep only the last 10 errors
+                        if (global.errors.length > 10) global.errors.shift();
+                        
+                        throw error; // Re-throw to maintain original behavior
+                    }
+                };
+            } else {
+                wrapped[key] = module[key];
+            }
+        }
+        
+        return wrapped;
     },
     
     /**
