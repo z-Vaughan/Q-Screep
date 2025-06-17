@@ -161,7 +161,6 @@ module.exports.loop = function() {
     }
     
     // Process creeps by role - this allows for better CPU batching
-    const utils = require('utils');
     
     // In emergency mode, process fewer creeps per tick
     const processCreepRole = function(creeps, roleFunction, priority) {
