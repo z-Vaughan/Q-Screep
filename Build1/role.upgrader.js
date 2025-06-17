@@ -8,14 +8,22 @@ const roleUpgrader = {
      * @param {Creep} creep - The creep to run the role for
      */
     run: function(creep) {
+        // Initialize upgrading state if not set
+        if (creep.memory.upgrading === undefined) {
+            creep.memory.upgrading = false;
+        }
+        
         // State switching with minimal operations
         if (creep.memory.upgrading && creep.store[RESOURCE_ENERGY] === 0) {
             creep.memory.upgrading = false;
+            creep.say('🔄 harvest');
             // Clear target cache when switching states
             delete creep.memory.energySourceId;
+            delete creep.memory.sourcePos;
         }
         if (!creep.memory.upgrading && creep.store.getFreeCapacity() === 0) {
             creep.memory.upgrading = true;
+            creep.say('⚡ upgrade');
             // Cache controller position when switching to upgrading
             if (!creep.memory.controllerPos) {
                 creep.memory.controllerPos = {
@@ -39,11 +47,19 @@ const roleUpgrader = {
                             creep.memory.controllerPos.y,
                             creep.memory.controllerPos.roomName
                         ),
-                        { reusePath: 20 } // Reuse path for longer since controller position is static
+                        { 
+                            reusePath: 20, // Reuse path for longer since controller position is static
+                            visualizePathStyle: {stroke: '#ffffff'}
+                        }
                     );
                 } else {
-                    creep.moveTo(creep.room.controller, { reusePath: 20 });
+                    creep.moveTo(creep.room.controller, { 
+                        reusePath: 20,
+                        visualizePathStyle: {stroke: '#ffffff'}
+                    });
                 }
+            } else if (upgradeResult !== OK) {
+                console.log(`Upgrader ${creep.name} error: ${upgradeResult} when upgrading controller`);
             }
         } else {
             // Get energy from the most efficient source
@@ -56,6 +72,8 @@ const roleUpgrader = {
      * @param {Creep} creep - The creep to get energy for
      */
     getEnergy: function(creep) {
+        const roomManager = require('roomManager');
+        
         // Use cached energy source if available
         let source = creep.memory.energySourceId ? Game.getObjectById(creep.memory.energySourceId) : null;
         
@@ -70,8 +88,18 @@ const roleUpgrader = {
         
         // Find new energy source if needed
         if (!source) {
-            // First check for containers near the controller (most efficient)
-            if (!creep.memory.nearbyContainersChecked || Game.time - creep.memory.nearbyContainersChecked > 50) {
+            // First check for controller container from room manager
+            const controllerContainer = roomManager.getRoomData(creep.room.name, 'controllerContainer');
+            if (controllerContainer) {
+                const container = Game.getObjectById(controllerContainer);
+                if (container && container.store[RESOURCE_ENERGY] > creep.store.getFreeCapacity() / 2) {
+                    source = container;
+                    creep.memory.energySourceId = container.id;
+                }
+            }
+            
+            // If no controller container found, check nearby containers
+            if (!source && (!creep.memory.nearbyContainersChecked || Game.time - creep.memory.nearbyContainersChecked > 50)) {
                 const containers = creep.pos.findInRange(FIND_STRUCTURES, 5, {
                     filter: s => s.structureType === STRUCTURE_CONTAINER && 
                               s.store[RESOURCE_ENERGY] > creep.store.getFreeCapacity() / 2
@@ -80,6 +108,11 @@ const roleUpgrader = {
                 if (containers.length > 0) {
                     source = containers[0];
                     creep.memory.energySourceId = source.id;
+                    
+                    // Update room manager with controller container
+                    if (!roomManager.getRoomData(creep.room.name, 'controllerContainer')) {
+                        creep.room.memory.controllerContainer = source.id;
+                    }
                 }
                 
                 creep.memory.nearbyContainersChecked = Game.time;
@@ -91,42 +124,76 @@ const roleUpgrader = {
                 creep.memory.energySourceId = source.id;
             }
             
-            // If no container or storage, use room's cached energy sources
-            if (!source && creep.room.memory.energySources && Game.time - (creep.room.memory.energySourcesTime || 0) < 10) {
-                for (const id of creep.room.memory.energySources) {
-                    const potentialSource = Game.getObjectById(id);
-                    if ((potentialSource && potentialSource.amount !== undefined && potentialSource.amount >= 50) || 
-                        (potentialSource && potentialSource.store && potentialSource.store[RESOURCE_ENERGY] > 0)) {
-                        source = potentialSource;
-                        creep.memory.energySourceId = id;
-                        break;
+            // If no container or storage, use room's cached energy sources from room manager
+            if (!source) {
+                const energySources = roomManager.getRoomData(creep.room.name, 'energySources');
+                const energySourcesTime = roomManager.getRoomData(creep.room.name, 'energySourcesTime');
+                
+                if (energySources && Game.time - (energySourcesTime || 0) < 10) {
+                    for (const id of energySources) {
+                        const potentialSource = Game.getObjectById(id);
+                        if ((potentialSource && potentialSource.amount !== undefined && potentialSource.amount >= 50) || 
+                            (potentialSource && potentialSource.store && potentialSource.store[RESOURCE_ENERGY] > 0)) {
+                            source = potentialSource;
+                            creep.memory.energySourceId = id;
+                            break;
+                        }
                     }
                 }
             }
             
             // Last resort - find active source
             if (!source) {
-                // Limit expensive searches
-                if (!creep.memory.lastSourceSearch || Game.time - creep.memory.lastSourceSearch > 10) {
-                    const activeSources = creep.room.find(FIND_SOURCES_ACTIVE);
-                    if (activeSources.length > 0) {
-                        // Find closest source
-                        let closestSource = activeSources[0];
-                        let minDistance = creep.pos.getRangeTo(closestSource);
-                        
-                        for (let i = 1; i < activeSources.length; i++) {
-                            const distance = creep.pos.getRangeTo(activeSources[i]);
+                // Use room manager's active sources if available
+                const activeSources = roomManager.getRoomData(creep.room.name, 'activeSources');
+                
+                if (activeSources && activeSources.length > 0) {
+                    // Find closest source
+                    let closestSource = null;
+                    let minDistance = Infinity;
+                    
+                    for (const id of activeSources) {
+                        const source = Game.getObjectById(id);
+                        if (source) {
+                            const distance = creep.pos.getRangeTo(source);
                             if (distance < minDistance) {
-                                closestSource = activeSources[i];
+                                closestSource = source;
                                 minDistance = distance;
                             }
                         }
-                        
+                    }
+                    
+                    if (closestSource) {
                         source = closestSource;
                         creep.memory.energySourceId = source.id;
                     }
-                    
-                    creep.memory.lastSourceSearch = Game.time;
+                } else {
+                    // Limit expensive searches
+                    if (!creep.memory.lastSourceSearch || Game.time - creep.memory.lastSourceSearch > 10) {
+                        const activeSources = creep.room.find(FIND_SOURCES_ACTIVE);
+                        if (activeSources.length > 0) {
+                            // Find closest source
+                            let closestSource = activeSources[0];
+                            let minDistance = creep.pos.getRangeTo(closestSource);
+                            
+                            for (let i = 1; i < activeSources.length; i++) {
+                                const distance = creep.pos.getRangeTo(activeSources[i]);
+                                if (distance < minDistance) {
+                                    closestSource = activeSources[i];
+                                    minDistance = distance;
+                                }
+                            }
+                            
+                            source = closestSource;
+                            creep.memory.energySourceId = source.id;
+                            
+                            // Update room manager with active sources
+                            creep.room.memory.activeSources = activeSources.map(s => s.id);
+                            creep.room.memory.activeSourcesTime = Game.time;
+                        }
+                        
+                        creep.memory.lastSourceSearch = Game.time;
+                    }
                 }
             }
         }
@@ -160,8 +227,13 @@ const roleUpgrader = {
                         creep.memory.sourcePos.y,
                         creep.memory.sourcePos.roomName
                     ),
-                    { reusePath: 15 }
+                    { 
+                        reusePath: 15,
+                        visualizePathStyle: {stroke: '#ffaa00'}
+                    }
                 );
+            } else if (actionResult !== OK) {
+                console.log(`Upgrader ${creep.name} error: ${actionResult} when gathering energy from ${source.id}`);
             }
         } else {
             // If no energy source found, move to controller area to wait

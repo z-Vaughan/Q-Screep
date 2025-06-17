@@ -119,6 +119,22 @@ const roomManager = {
             if (roomCache.sitesByType) {
                 roomMemory.sitesByType = roomCache.sitesByType;
             }
+            
+            // Update energy source data
+            if (roomCache.energySources) {
+                roomMemory.energySources = roomCache.energySources;
+            }
+            if (roomCache.energySourcesTime) {
+                roomMemory.energySourcesTime = roomCache.energySourcesTime;
+            }
+            
+            // Update active sources data
+            if (roomCache.activeSources) {
+                roomMemory.activeSources = roomCache.activeSources;
+            }
+            if (roomCache.activeSourcesTime) {
+                roomMemory.activeSourcesTime = roomCache.activeSourcesTime;
+            }
         }
         
         this.cache.memoryUpdateScheduled = false;
@@ -131,6 +147,11 @@ const roomManager = {
     performFullUpdate: function(room) {
         // Find and cache sources
         const sources = room.find(FIND_SOURCES);
+        
+        // Track active sources
+        const activeSources = sources.filter(source => source.energy > 0).map(source => source.id);
+        this.cache[room.name].activeSources = activeSources;
+        this.cache[room.name].activeSourcesTime = Game.time;
         for (const source of sources) {
             // Count available mining positions if not already done
             if (!room.memory.sources[source.id]) {

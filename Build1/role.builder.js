@@ -16,7 +16,7 @@ const roleBuilder = {
         // State switching with minimal operations
         if (creep.memory.building && creep.store[RESOURCE_ENERGY] === 0) {
             creep.memory.building = false;
-            creep.say('🔄 harvest');
+            creep.say('🔄');
             // Clear target cache when switching states
             delete creep.memory.targetId;
             delete creep.memory.targetPos;
@@ -24,7 +24,7 @@ const roleBuilder = {
         }
         if (!creep.memory.building && creep.store.getFreeCapacity() === 0) {
             creep.memory.building = true;
-            creep.say('🚧 build');
+            creep.say('🚧');
             // Clear target cache when switching states
             delete creep.memory.energySourceId;
             delete creep.memory.sourcePos;
