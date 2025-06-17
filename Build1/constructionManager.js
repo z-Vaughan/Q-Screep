@@ -17,6 +17,23 @@ const constructionManagerImpl = {
         // Check if we're in a simulation room
         const isSimulation = room.name.startsWith('sim');
         
+        // Initialize room memory if needed
+        if (!room.memory) {
+            room.memory = {};
+        }
+        
+        // Initialize construction memory if needed
+        if (!room.memory.construction) {
+            room.memory.construction = {
+                roads: { planned: false },
+                extensions: { planned: false, count: 0 },
+                containers: { planned: false },
+                storage: { planned: false },
+                towers: { planned: false, count: 0 },
+                lastUpdate: 0
+            };
+        }
+        
         // Always update construction site count for roomManager
         this.updateConstructionSiteCount(room);
         
@@ -843,6 +860,18 @@ const constructionManagerImpl = {
         // Update room memory
         room.memory.constructionSites = sites.length;
         room.memory.constructionSiteIds = sites.map(site => site.id);
+        
+        // Initialize construction memory if needed
+        if (!room.memory.construction) {
+            room.memory.construction = {
+                roads: { planned: false },
+                extensions: { planned: false, count: 0 },
+                containers: { planned: false },
+                storage: { planned: false },
+                towers: { planned: false, count: 0 },
+                lastUpdate: 0
+            };
+        }
         
         // Check if we need to create more sites
         const TARGET_SITES_PER_ROOM = 5;
