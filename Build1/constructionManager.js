@@ -809,40 +809,7 @@ const constructionManager = {
         return bestPos;
     },
     
-    /**
-     * Create construction sites with debug logging
-     * @param {Room} room - The room to create construction sites in
-     */
-    createConstructionSitesDebug: function(room) {
-        console.log(`Starting debug construction site creation in room ${room.name}`);
-        
-        // Check if we have plans
-        if (!room.memory.construction) {
-            console.log(`No construction plans found for room ${room.name}`);
-            return;
-        }
-        
-        // Log planned structures
-        if (room.memory.construction.roads && room.memory.construction.roads.positions) {
-            console.log(`Found ${room.memory.construction.roads.positions.length} planned road positions`);
-        }
-        if (room.memory.construction.extensions && room.memory.construction.extensions.positions) {
-            console.log(`Found ${room.memory.construction.extensions.positions.length} planned extension positions`);
-        }
-        if (room.memory.construction.containers && room.memory.construction.containers.positions) {
-            console.log(`Found ${room.memory.construction.containers.positions.length} planned container positions`);
-        }
-        
-        // Force create sites
-        this.createConstructionSites(room);
-        
-        // Log results
-        const sites = room.find(FIND_CONSTRUCTION_SITES);
-        console.log(`After creation: ${sites.length} construction sites in room ${room.name}`);
-        sites.forEach(site => {
-            console.log(`- ${site.structureType} at (${site.pos.x},${site.pos.y}): ${site.progress}/${site.progressTotal}`);
-        });
-    },
+
     
     /**
      * Create construction sites based on plans

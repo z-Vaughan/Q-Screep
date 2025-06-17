@@ -129,12 +129,12 @@ global.forceConstruction = function(roomName) {
         return `Created road plans for room ${roomName}. Run this command again to create sites.`;
     }
     
-    // Force create construction sites with debug logging
+    // Force create construction sites
     const sites = room.find(FIND_CONSTRUCTION_SITES);
     console.log(`Room ${roomName} currently has ${sites.length} construction sites`);
     
-    // Directly call createConstructionSites
-    constructionManager.createConstructionSites(room);
+    // Force run the construction manager
+    constructionManager.run(room, true);
     
     // Count how many sites were created
     const newSites = room.find(FIND_CONSTRUCTION_SITES);

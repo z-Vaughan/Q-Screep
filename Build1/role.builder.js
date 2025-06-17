@@ -101,8 +101,8 @@ const roleBuilder = {
             }
             
             // Validate target before interacting
-            if (!this.isValidTarget(target)) {
-                console.log(`Builder ${creep.name} has invalid target ${target.id}, finding new target`);
+            if (target && !target.id) {
+                console.log(`Builder ${creep.name} has invalid target, finding new target`);
                 delete creep.memory.targetId;
                 delete creep.memory.targetPos;
                 return;
@@ -200,7 +200,7 @@ const roleBuilder = {
                 const highestPriority = sites[0].structureType;
                 const highPrioritySites = sites.filter(s => s.structureType === highestPriority);
                 
-                target = this.findClosestByRange(creep, highPrioritySites);
+                target = creep.pos.findClosestByRange(highPrioritySites);
                 
                 if (target) {
                     console.log(`Builder ${creep.name} found ${target.structureType} construction site at ${target.pos.x},${target.pos.y}`);
