@@ -82,7 +82,6 @@ const constructionManager = {
         room.memory.construction.lastUpdate = Game.time;
         
         // Log construction status
-        const isSimulation = room.name.startsWith('sim');
         if (force || Game.time % (isSimulation ? 20 : 100) === 0) {
             console.log(`Construction status for ${room.name}: ` +
                 `Roads: ${room.memory.construction.roads.planned ? 'Planned' : 'Not Planned'}, ` +
@@ -383,10 +382,150 @@ const constructionManager = {
      * @param {Array} existingPositions - Positions to avoid
      * @returns {Object|null} - Position object or null if no valid position
      */
+    findTowerPosition: function(room, anchorPos, minRange, maxRange, existingPositions = []) {
+        const terrain = room.getTerrain();
+        let bestPos = null;
+        let bestScore = -1;
+        
+        // Check positions in a square around the anchor
+        for (let dx = -maxRange; dx <= maxRange; dx++) {
+            for (let dy = -maxRange; dy <= maxRange; dy++) {
+                const x = anchorPos.x + dx;
+                const y = anchorPos.y + dy;
+                
+                // Skip if out of bounds or on a wall
+                if (x <= 2 || y <= 2 || x >= 47 || y >= 47 || 
+                    terrain.get(x, y) === TERRAIN_MASK_WALL) {
+                    continue;
+                }
+                
+                // Calculate Manhattan distance
+                const distance = Math.abs(dx) + Math.abs(dy);
+                
+                // Skip if too close or too far
+                if (distance < minRange || distance > maxRange) {
+                    continue;
+                }
+                
+                // Skip if too close to existing positions
+                let tooClose = false;
+                for (const pos of existingPositions) {
+                    if (Math.abs(pos.x - x) + Math.abs(pos.y - y) < 3) {
+                        tooClose = true;
+                        break;
+                    }
+                }
+                if (tooClose) continue;
+                
+                // Calculate score based on open space and distance
+                let score = 0;
+                
+                // Prefer positions with open space around them
+                for (let nx = -1; nx <= 1; nx++) {
+                    for (let ny = -1; ny <= 1; ny++) {
+                        const ax = x + nx;
+                        const ay = y + ny;
+                        if (ax >= 0 && ay >= 0 && ax < 50 && ay < 50 && 
+                            terrain.get(ax, ay) !== TERRAIN_MASK_WALL) {
+                            score++;
+                        }
+                    }
+                }
+                
+                // Adjust score based on distance (prefer middle of range)
+                const distanceScore = maxRange - Math.abs(distance - (minRange + maxRange) / 2);
+                score += distanceScore;
+                
+                if (score > bestScore) {
+                    bestScore = score;
+                    bestPos = { x, y };
+                }
+            }
+        }
+        
+        return bestPos;
+    },
+    
     /**
      * Plan storage placement for the room
      * @param {Room} room - The room to plan storage for
      */
+    planStorage: function(room) {
+        // Skip if below RCL 4
+        if (room.controller.level < 4) return;
+        
+        // Find spawn
+        const spawns = room.find(FIND_MY_SPAWNS);
+        if (spawns.length === 0) return;
+        
+        const spawn = spawns[0];
+        const terrain = room.getTerrain();
+        
+        // Find a good position for storage near spawn
+        let storagePos = null;
+        let bestScore = -1;
+        
+        // Check positions in a radius around spawn
+        for (let dx = -5; dx <= 5; dx++) {
+            for (let dy = -5; dy <= 5; dy++) {
+                // Skip positions too close or too far
+                const dist = Math.abs(dx) + Math.abs(dy);
+                if (dist < 2 || dist > 6) continue;
+                
+                const x = spawn.pos.x + dx;
+                const y = spawn.pos.y + dy;
+                
+                // Skip if out of bounds or on a wall
+                if (x <= 2 || y <= 2 || x >= 47 || y >= 47 || 
+                    terrain.get(x, y) === TERRAIN_MASK_WALL) {
+                    continue;
+                }
+                
+                // Calculate score based on open space and distance
+                let score = 10 - dist; // Prefer closer positions
+                
+                // Add score for adjacent walkable tiles
+                for (let nx = -1; nx <= 1; nx++) {
+                    for (let ny = -1; ny <= 1; ny++) {
+                        const ax = x + nx;
+                        const ay = y + ny;
+                        if (ax >= 0 && ay >= 0 && ax < 50 && ay < 50 && 
+                            terrain.get(ax, ay) !== TERRAIN_MASK_WALL) {
+                            score++;
+                        }
+                    }
+                }
+                
+                // Check if position is on a road or near planned extensions
+                const lookResult = room.lookAt(x, y);
+                for (const item of lookResult) {
+                    if (item.type === LOOK_STRUCTURES && 
+                        (item.structure.structureType === STRUCTURE_ROAD || 
+                         item.structure.structureType === STRUCTURE_EXTENSION)) {
+                        score -= 5; // Penalize positions on roads or near extensions
+                    }
+                }
+                
+                if (score > bestScore) {
+                    bestScore = score;
+                    storagePos = { x, y };
+                }
+            }
+        }
+        
+        // Save storage plan to memory
+        room.memory.construction.storage = {
+            planned: true,
+            position: storagePos
+        };
+        
+        if (storagePos) {
+            console.log(`Planned storage position at (${storagePos.x},${storagePos.y}) in room ${room.name}`);
+        } else {
+            console.log(`Could not find suitable storage position in room ${room.name}`);
+        }
+    },
+    
     /**
      * Check if room has evolved and needs plan updates
      * @param {Room} room - The room to check
