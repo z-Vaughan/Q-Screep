@@ -96,20 +96,41 @@ const spawnManager = {
      */
     getNeededRole: function(room, counts) {
         // Get source count from room memory
-        const sourceCount = Object.keys(room.memory.sources || {}).length;
+        const sourceCount = Object.keys(room.memory.sources || {}).length || 1;
         
-        // Calculate minimum creeps needed based on source count
-        const minHarvesters = Math.min(sourceCount * 2, 2);
-        const minHaulers = Math.min(sourceCount * 2, 2);
-        const minUpgraders = 1;
-        const minBuilders = (roomManager.getRoomData(room.name, 'constructionSites') || 0) > 0 ? 1 : 0;
+        // Get construction site count
+        const constructionSites = roomManager.getRoomData(room.name, 'constructionSites') || 0;
+        const repairTargets = roomManager.getRoomData(room.name, 'repairTargets') || 0;
         
-        // Calculate maximum creeps based on RCL and source count
+        // Calculate RCL-based values
         const rcl = room.controller.level;
-        const maxHarvesters = sourceCount * 3;
-        const maxHaulers = sourceCount * 2;
-        const maxUpgraders = rcl <= 2 ? 2 : 3;
-        const maxBuilders = (roomManager.getRoomData(room.name, 'constructionSites') || 0) > 3 ? 2 : 1;
+        
+        // Calculate work units needed
+        const harvestWorkNeeded = sourceCount * 5; // Each source can support ~5 WORK parts
+        const constructionWorkNeeded = Math.min(5, constructionSites); // Cap at 5 work units
+        const repairWorkNeeded = Math.min(2, repairTargets); // Cap at 2 work units
+        const upgradeWorkNeeded = rcl <= 2 ? 2 : 3; // More upgraders at higher RCL
+        
+        // Calculate carry units needed
+        const carryUnitsNeeded = sourceCount * 4; // Each source needs ~4 CARRY parts of transport
+        
+        // Calculate actual work units available
+        const harvesterWorkUnits = counts.harvester * 2; // Assume 2 WORK parts per harvester
+        const builderWorkUnits = counts.builder * 1; // Assume 1 WORK part per builder
+        const upgraderWorkUnits = counts.upgrader * 1; // Assume 1 WORK part per upgrader
+        const haulerCarryUnits = counts.hauler * 4; // Assume 4 CARRY parts per hauler
+        
+        // Calculate minimum creeps needed based on work units
+        const minHarvesters = Math.ceil(Math.min(harvestWorkNeeded, 10) / 2); // Each harvester has ~2 WORK parts
+        const minHaulers = Math.ceil(carryUnitsNeeded / 4); // Each hauler has ~4 CARRY parts
+        const minUpgraders = 1; // Always need at least one upgrader
+        const minBuilders = constructionSites > 0 ? 1 : 0; // Only need builders if there's construction
+        
+        // Calculate maximum creeps based on RCL and needs
+        const maxHarvesters = Math.ceil(harvestWorkNeeded / 2);
+        const maxHaulers = Math.ceil(carryUnitsNeeded / 3);
+        const maxUpgraders = Math.ceil(upgradeWorkNeeded / 1);
+        const maxBuilders = Math.ceil((constructionWorkNeeded + repairWorkNeeded) / 1);
         
         // Total creep cap based on RCL
         const maxTotalCreeps = rcl <= 2 ? 10 : 15;
@@ -133,35 +154,26 @@ const spawnManager = {
             return null;
         }
         
-        // Get room priorities from cache
-        const priorities = roomManager.getRoomData(room.name, 'priorities') || {
-            upgrade: 'medium',
-            build: 'low',
-            repair: 'low'
-        };
+        // Calculate work deficits
+        const harvesterDeficit = harvestWorkNeeded - harvesterWorkUnits;
+        const builderDeficit = (constructionWorkNeeded + repairWorkNeeded) - builderWorkUnits;
+        const upgraderDeficit = upgradeWorkNeeded - upgraderWorkUnits;
+        const haulerDeficit = carryUnitsNeeded - haulerCarryUnits;
         
-        // Spawn additional creeps based on priorities and max limits
-        const constructionSites = roomManager.getRoomData(room.name, 'constructionSites') || 0;
-        const repairTargets = roomManager.getRoomData(room.name, 'repairTargets') || 0;
+        // Create a priority queue based on deficits
+        const priorities = [
+            { role: 'harvester', deficit: harvesterDeficit, max: maxHarvesters, current: counts.harvester },
+            { role: 'hauler', deficit: haulerDeficit, max: maxHaulers, current: counts.hauler },
+            { role: 'builder', deficit: constructionSites > 0 ? builderDeficit : 0, max: maxBuilders, current: counts.builder },
+            { role: 'upgrader', deficit: upgraderDeficit, max: maxUpgraders, current: counts.upgrader }
+        ];
         
-        if (priorities.build === 'high' && constructionSites > 0 && counts.builder < maxBuilders) {
-            return 'builder';
-        }
+        // Sort by deficit (highest first) and filter out roles at max capacity
+        priorities.sort((a, b) => b.deficit - a.deficit)
+                 .filter(p => p.current < p.max && p.deficit > 0);
         
-        if (priorities.upgrade === 'high' && counts.upgrader < maxUpgraders) {
-            return 'upgrader';
-        }
-        
-        if (priorities.repair === 'high' && repairTargets > 0 && counts.builder < maxBuilders) {
-            return 'builder';
-        }
-        
-        // Only spawn additional upgraders if we have energy to spare and below max
-        if (room.energyAvailable >= room.energyCapacityAvailable * 0.8 && counts.upgrader < maxUpgraders) {
-            return 'upgrader';
-        }
-        
-        return null; // No new creeps needed
+        // Return the role with the highest deficit
+        return priorities.length > 0 ? priorities[0].role : null;
     },
     
     /**

@@ -82,7 +82,26 @@ const roleHauler = {
         const room = creep.room;
         const roomManager = require('roomManager');
         
-        // First check for builder energy requests
+        // First check if spawns or extensions need energy
+        const spawnsAndExtensions = room.find(FIND_STRUCTURES, {
+            filter: s => (s.structureType === STRUCTURE_EXTENSION || s.structureType === STRUCTURE_SPAWN) && 
+                         s.store.getFreeCapacity(RESOURCE_ENERGY) > 0
+        });
+        
+        // If any spawns or extensions need energy, prioritize them
+        if (spawnsAndExtensions.length > 0) {
+            const closest = spawnsAndExtensions.reduce((closest, structure) => {
+                const distance = creep.pos.getRangeTo(structure);
+                return !closest || distance < creep.pos.getRangeTo(closest) ? structure : closest;
+            }, null);
+            
+            if (closest) {
+                creep.memory.targetId = closest.id;
+                return;
+            }
+        }
+        
+        // Only check for builder energy requests if spawns and extensions are full
         if (room.memory.energyRequests && Object.keys(room.memory.energyRequests).length > 0) {
             // Find the highest priority builder request
             let bestRequest = null;

@@ -30,6 +30,7 @@ const roleBuilder = {
             // Clear target cache when switching states
             delete creep.memory.energySourceId;
             delete creep.memory.sourcePos;
+            delete creep.memory.harvestingStarted; // Reset harvesting flag
             // Clear energy request when switching to building
             this.clearEnergyRequest(creep);
             console.log(`Builder ${creep.name} switching to building mode`);
@@ -44,19 +45,20 @@ const roleBuilder = {
         if (creep.memory.building) {
             this.performBuilding(creep);
         } else {
-            // When switching to harvesting mode, set a wait timer
-            if (!creep.memory.waitStartTime && creep.store[RESOURCE_ENERGY] === 0) {
+            // When switching to harvesting mode, set a wait timer (only if not already harvesting)
+            if (!creep.memory.waitStartTime && !creep.memory.harvestingStarted && creep.store[RESOURCE_ENERGY] === 0) {
                 creep.memory.waitStartTime = Game.time;
                 creep.say('⏳');
             }
             
-            // Wait for haulers for 20 ticks before harvesting
-            if (creep.memory.waitStartTime && Game.time - creep.memory.waitStartTime < 20) {
+            // Wait for haulers for 30 ticks before harvesting
+            if (creep.memory.waitStartTime && Game.time - creep.memory.waitStartTime < 30) {
                 // Just wait in place
-                creep.say('⏳' + (20 - (Game.time - creep.memory.waitStartTime)));
+                creep.say('⏳' + (30 - (Game.time - creep.memory.waitStartTime)));
             } else {
                 // Clear wait timer and proceed with harvesting
                 delete creep.memory.waitStartTime;
+                creep.memory.harvestingStarted = true; // Flag to prevent restarting the wait timer
                 this.getEnergy(creep);
             }
         }
