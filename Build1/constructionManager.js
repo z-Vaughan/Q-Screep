@@ -48,35 +48,42 @@ const constructionManagerImpl = {
             };
         }
         
+        // Ensure all required construction memory properties exist
+        if (!room.memory.construction.roads) room.memory.construction.roads = { planned: false };
+        if (!room.memory.construction.extensions) room.memory.construction.extensions = { planned: false, count: 0 };
+        if (!room.memory.construction.containers) room.memory.construction.containers = { planned: false };
+        if (!room.memory.construction.storage) room.memory.construction.storage = { planned: false };
+        if (!room.memory.construction.towers) room.memory.construction.towers = { planned: false, count: 0 };
+        
         // Plan roads if not already planned
-        if (!room.memory.construction.roads.planned) {
+        if (!room.memory.construction.roads || !room.memory.construction.roads.planned) {
             console.log(`Planning roads in room ${room.name}`);
             this.planRoads(room);
             return; // Only do one major planning operation per tick
         }
         
         // Plan containers if not already planned
-        if (!room.memory.construction.containers.planned) {
+        if (!room.memory.construction.containers || !room.memory.construction.containers.planned) {
             console.log(`Planning containers in room ${room.name}`);
             this.planContainers(room);
             return; // Only do one major planning operation per tick
         }
         
         // Plan extensions if not already planned and we're at RCL 2+
-        if (!room.memory.construction.extensions.planned && room.controller.level >= 2) {
+        if ((!room.memory.construction.extensions || !room.memory.construction.extensions.planned) && room.controller.level >= 2) {
             console.log(`Planning extensions in room ${room.name} (RCL: ${room.controller.level})`);
             this.planExtensions(room);
             return; // Only do one major planning operation per tick
         }
         
         // Plan towers if not already planned and we're at RCL 3+
-        if (!room.memory.construction.towers.planned && room.controller.level >= 3) {
+        if ((!room.memory.construction.towers || !room.memory.construction.towers.planned) && room.controller.level >= 3) {
             this.planTowers(room);
             return; // Only do one major planning operation per tick
         }
         
         // Plan storage if not already planned and we're at RCL 4+
-        if (!room.memory.construction.storage.planned && room.controller.level >= 4) {
+        if ((!room.memory.construction.storage || !room.memory.construction.storage.planned) && room.controller.level >= 4) {
             this.planStorage(room);
             return; // Only do one major planning operation per tick
         }
@@ -568,7 +575,7 @@ const constructionManagerImpl = {
         }
         
         // Periodically check if we need to replan roads (every 1000 ticks)
-        if (Game.time % 1000 === 0 && room.memory.construction.roads.planned) {
+        if (Game.time % 1000 === 0 && room.memory.construction.roads && room.memory.construction.roads.planned) {
             // Count existing roads
             const roads = room.find(FIND_STRUCTURES, {
                 filter: s => s.structureType === STRUCTURE_ROAD
@@ -724,7 +731,7 @@ const constructionManagerImpl = {
         }
         
         // Create road construction sites first
-        if (room.memory.construction.roads && 
+        if (room.memory.construction && room.memory.construction.roads && 
             room.memory.construction.roads.planned && 
             room.memory.construction.roads.positions) {
             
@@ -823,7 +830,7 @@ const constructionManagerImpl = {
         }
         
         // Create container construction sites if we have capacity
-        if (room.memory.construction.containers && 
+        if (room.memory.construction && room.memory.construction.containers && 
             room.memory.construction.containers.planned && 
             room.memory.construction.containers.positions) {
             
@@ -857,7 +864,7 @@ const constructionManagerImpl = {
         }
         
         // Create extension construction sites if we have capacity
-        if (room.controller.level >= 2 && 
+        if (room.controller.level >= 2 && room.memory.construction && 
             room.memory.construction.extensions && 
             room.memory.construction.extensions.planned && 
             room.memory.construction.extensions.positions) {
@@ -902,7 +909,7 @@ const constructionManagerImpl = {
         }
         
         // Create tower construction sites if we have capacity
-        if (room.controller.level >= 3 && 
+        if (room.controller.level >= 3 && room.memory.construction && 
             room.memory.construction.towers && 
             room.memory.construction.towers.planned && 
             room.memory.construction.towers.positions) {
@@ -947,7 +954,7 @@ const constructionManagerImpl = {
         }
         
         // Create storage construction site if we have capacity
-        if (room.controller.level >= 4 && 
+        if (room.controller.level >= 4 && room.memory.construction && 
             room.memory.construction.storage && 
             room.memory.construction.storage.planned && 
             room.memory.construction.storage.position && 
