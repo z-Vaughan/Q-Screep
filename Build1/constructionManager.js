@@ -14,6 +14,9 @@ const constructionManager = {
         // Check if we're in a simulation room
         const isSimulation = room.name.startsWith('sim');
         
+        // Always update construction site count for roomManager
+        this.updateConstructionSiteCount(room);
+        
         // Run more frequently in simulation rooms
         const interval = isSimulation ? 5 : // Every 5 ticks in simulation
             (global.emergencyMode ? 
@@ -717,6 +720,27 @@ const constructionManager = {
     },
     
     /**
+     * Update the construction site count in room memory
+     * @param {Room} room - The room to update
+     */
+    updateConstructionSiteCount: function(room) {
+        // Find all construction sites in the room
+        const sites = room.find(FIND_CONSTRUCTION_SITES);
+        
+        // Update room memory
+        room.memory.constructionSites = sites.length;
+        room.memory.constructionSiteIds = sites.map(site => site.id);
+        
+        // Check if we need to create more sites
+        const TARGET_SITES_PER_ROOM = 5;
+        if (sites.length < TARGET_SITES_PER_ROOM && 
+            (!room.memory.construction.lastUpdate || Game.time - room.memory.construction.lastUpdate >= 20)) {
+            // Force a construction site creation check soon
+            room.memory.construction.lastUpdate = Game.time - 95; // Will trigger in 5 ticks
+        }
+    },
+    
+    /**
      * Find the best position for a container near the controller
      * @param {Room} room - The room to check
      * @returns {Object|null} - Position object or null if no valid position
@@ -777,20 +801,29 @@ const constructionManager = {
     createConstructionSites: function(room) {
         // Check for global construction site limit
         const globalSiteCount = Object.keys(Game.constructionSites).length;
-        const MAX_SITES_PER_ROOM = 5;
+        const TARGET_SITES_PER_ROOM = 5; // We want to maintain 5 sites at all times
         const MAX_GLOBAL_SITES = 100; // Game limit is 100
         
         if (globalSiteCount >= MAX_GLOBAL_SITES) return;
         
-        // Limit the number of construction sites to avoid CPU spikes
+        // Count existing construction sites in this room
         const existingSites = room.find(FIND_CONSTRUCTION_SITES);
-        if (existingSites.length >= MAX_SITES_PER_ROOM) return;
         
-        // How many more sites we can place
+        // If we already have enough sites, no need to create more
+        if (existingSites.length >= TARGET_SITES_PER_ROOM) {
+            // Update room memory with current construction site count and IDs
+            room.memory.constructionSites = existingSites.length;
+            room.memory.constructionSiteIds = existingSites.map(site => site.id);
+            return;
+        }
+        
+        // How many more sites we need to place to reach our target
         const sitesToPlace = Math.min(
-            MAX_SITES_PER_ROOM - existingSites.length,
+            TARGET_SITES_PER_ROOM - existingSites.length,
             MAX_GLOBAL_SITES - globalSiteCount
         );
+        
+        console.log(`Room ${room.name} has ${existingSites.length} construction sites, creating ${sitesToPlace} more to reach target of ${TARGET_SITES_PER_ROOM}`);
         let sitesPlaced = 0;
         
         // Create a map of existing structures for faster lookups
@@ -987,6 +1020,22 @@ const constructionManager = {
                     sitesPlaced++;
                 }
             }
+        }
+        
+        // Update room memory with current construction site count and IDs
+        const updatedSites = room.find(FIND_CONSTRUCTION_SITES);
+        room.memory.constructionSites = updatedSites.length;
+        room.memory.constructionSiteIds = updatedSites.map(site => site.id);
+        
+        // Log if we created new sites
+        if (sitesPlaced > 0) {
+            console.log(`Created ${sitesPlaced} new construction sites in room ${room.name}, total now: ${updatedSites.length}`);
+        }
+        
+        // If we still don't have enough sites, run again next tick
+        if (updatedSites.length < TARGET_SITES_PER_ROOM) {
+            // Force more frequent checks until we reach our target
+            room.memory.construction.lastUpdate = Game.time - 95; // Will trigger again in 5 ticks
         }
     }
 };
