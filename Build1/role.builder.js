@@ -44,7 +44,21 @@ const roleBuilder = {
         if (creep.memory.building) {
             this.performBuilding(creep);
         } else {
-            this.getEnergy(creep);
+            // When switching to harvesting mode, set a wait timer
+            if (!creep.memory.waitStartTime && creep.store[RESOURCE_ENERGY] === 0) {
+                creep.memory.waitStartTime = Game.time;
+                creep.say('⏳');
+            }
+            
+            // Wait for haulers for 20 ticks before harvesting
+            if (creep.memory.waitStartTime && Game.time - creep.memory.waitStartTime < 20) {
+                // Just wait in place
+                creep.say('⏳' + (20 - (Game.time - creep.memory.waitStartTime)));
+            } else {
+                // Clear wait timer and proceed with harvesting
+                delete creep.memory.waitStartTime;
+                this.getEnergy(creep);
+            }
         }
     },
     
@@ -409,6 +423,7 @@ const roleBuilder = {
             pos: {x: creep.pos.x, y: creep.pos.y, roomName: creep.room.name},
             amount: creep.store.getFreeCapacity(RESOURCE_ENERGY),
             timestamp: Game.time,
+            waitStartTime: creep.memory.waitStartTime || Game.time,
             targetSite: targetSiteInfo,
             priority: this.calculateRequestPriority(creep)
         };

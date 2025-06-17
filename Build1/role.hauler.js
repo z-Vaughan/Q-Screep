@@ -106,7 +106,12 @@ const roleHauler = {
                 
                 // Calculate score (lower is better)
                 const distance = creep.pos.getRangeTo(builder);
-                const score = request.priority + (distance * 0.5);
+                const waitTime = Game.time - (request.waitStartTime || request.timestamp);
+                
+                // Factor in wait time - longer wait = higher priority (lower score)
+                const waitFactor = Math.max(0, 20 - waitTime) * 2; // Reduce score by up to 40 points for waiting
+                
+                const score = request.priority + (distance * 0.5) - waitFactor;
                 
                 if (score < bestScore) {
                     bestScore = score;
@@ -256,6 +261,15 @@ const roleHauler = {
         if (target) {
             // Handle controller separately
             if (target.structureType === STRUCTURE_CONTROLLER) {
+                // Check for builder requests every tick when working with controller
+                if (creep.room.memory.energyRequests && 
+                    Object.keys(creep.room.memory.energyRequests).length > 0) {
+                    // If there are builder requests, prioritize them over controller
+                    delete creep.memory.targetId;
+                    this.findDeliveryTarget(creep);
+                    return;
+                }
+                
                 if (creep.upgradeController(target) === ERR_NOT_IN_RANGE) {
                     creep.moveTo(target, { 
                         reusePath: 10,
