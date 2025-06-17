@@ -6,8 +6,9 @@ const constructionManager = {
     /**
      * Run the construction manager for a room
      * @param {Room} room - The room to manage construction for
+     * @param {boolean} force - Force run regardless of interval
      */
-    run: function(room) {
+    run: function(room, force = false) {
         const utils = require('utils');
         
         // Only run every 100 ticks to save CPU - construction is not time-critical
@@ -15,7 +16,7 @@ const constructionManager = {
         const interval = global.emergencyMode ? 
             (global.emergencyMode.level === 'critical' ? 500 : 200) : 100;
             
-        if (Game.time % interval !== 0) return;
+        if (!force && Game.time % interval !== 0) return;
         
         // Skip if we don't own the controller
         if (!room.controller || !room.controller.my) return;
@@ -40,18 +41,21 @@ const constructionManager = {
         
         // Plan roads if not already planned
         if (!room.memory.construction.roads.planned) {
+            console.log(`Planning roads in room ${room.name}`);
             this.planRoads(room);
             return; // Only do one major planning operation per tick
         }
         
         // Plan containers if not already planned
         if (!room.memory.construction.containers.planned) {
+            console.log(`Planning containers in room ${room.name}`);
             this.planContainers(room);
             return; // Only do one major planning operation per tick
         }
         
         // Plan extensions if not already planned and we're at RCL 2+
         if (!room.memory.construction.extensions.planned && room.controller.level >= 2) {
+            console.log(`Planning extensions in room ${room.name} (RCL: ${room.controller.level})`);
             this.planExtensions(room);
             return; // Only do one major planning operation per tick
         }
@@ -73,6 +77,16 @@ const constructionManager = {
         
         // Update timestamp
         room.memory.construction.lastUpdate = Game.time;
+        
+        // Log construction status
+        if (force || Game.time % 100 === 0) {
+            console.log(`Construction status for ${room.name}: ` +
+                `Roads: ${room.memory.construction.roads.planned ? 'Planned' : 'Not Planned'}, ` +
+                `Extensions: ${room.memory.construction.extensions.planned ? 'Planned' : 'Not Planned'}, ` +
+                `Containers: ${room.memory.construction.containers?.planned ? 'Planned' : 'Not Planned'}, ` +
+                `RCL: ${room.controller.level}`
+            );
+        }
     },
     
     /**

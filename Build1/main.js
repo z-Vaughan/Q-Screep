@@ -28,6 +28,37 @@ global.stats = {
 // Global utility functions
 global.utils = utils;
 
+// Global construction trigger function
+global.planConstruction = function(roomName) {
+    const room = Game.rooms[roomName];
+    if (!room) {
+        console.log(`Room ${roomName} not found or not visible`);
+        return;
+    }
+    
+    if (!room.controller || !room.controller.my) {
+        console.log(`You don't control room ${roomName}`);
+        return;
+    }
+    
+    // Reset construction plans to force replanning
+    if (!room.memory.construction) {
+        room.memory.construction = {};
+    }
+    
+    room.memory.construction.roads = { planned: false };
+    room.memory.construction.extensions = { planned: false, count: 0 };
+    room.memory.construction.containers = { planned: false };
+    room.memory.construction.storage = { planned: false };
+    room.memory.construction.towers = { planned: false, count: 0 };
+    
+    // Force run the construction manager
+    console.log(`Forcing construction planning in room ${roomName}`);
+    constructionManager.run(room, true);
+    
+    return `Construction planning triggered for room ${roomName}`;
+};
+
 // Global error handler
 const errorHandler = function(error) {
     console.log(`UNCAUGHT EXCEPTION: ${error.stack || error}`);
@@ -124,8 +155,8 @@ module.exports.loop = function() {
             global.stats.cpu.spawning += Game.cpu.getUsed() - spawnStart;
         }
         
-        // Handle construction planning - run less frequently
-        if (Game.cpu.bucket > 3000) {
+        // Handle construction planning - run periodically regardless of CPU bucket
+        if (Game.cpu.bucket > 3000 || currentTick % 10 === 0) {
             const constructionStart = Game.cpu.getUsed();
             constructionManager.run(room);
             global.stats.cpu.construction += Game.cpu.getUsed() - constructionStart;
