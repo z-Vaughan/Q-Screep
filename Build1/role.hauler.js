@@ -4,9 +4,16 @@
  */
 const roleHauler = {
     run: function(creep) {
+        // Check and clean up builder assignments if needed
+        this.checkBuilderAssignments(creep);
+        
         // State switching with minimal operations
         if (creep.memory.working && creep.store[RESOURCE_ENERGY] === 0) {
             creep.memory.working = false;
+            // Clear any builder assignments when empty
+            if (creep.memory.assignedRequestId) {
+                this.clearBuilderAssignment(creep);
+            }
         } else if (!creep.memory.working && creep.store.getFreeCapacity() === 0) {
             creep.memory.working = true;
             // Pre-calculate target when switching to delivery mode
@@ -21,8 +28,102 @@ const roleHauler = {
         }
     },
     
+    /**
+     * Check and clean up builder assignments if needed
+     * @param {Creep} creep - The hauler creep
+     */
+    checkBuilderAssignments: function(creep) {
+        // If we have an assigned builder request, validate it
+        if (creep.memory.assignedRequestId) {
+            const builder = Game.getObjectById(creep.memory.assignedRequestId);
+            const request = creep.room.memory.energyRequests && 
+                           creep.room.memory.energyRequests[creep.memory.assignedRequestId];
+            
+            // Clear assignment if builder or request no longer exists
+            if (!builder || !request) {
+                this.clearBuilderAssignment(creep);
+                return;
+            }
+            
+            // Clear assignment if builder is full
+            if (builder.store.getFreeCapacity(RESOURCE_ENERGY) === 0) {
+                this.clearBuilderAssignment(creep);
+                return;
+            }
+            
+            // Clear assignment if we're empty and not working
+            if (!creep.memory.working && creep.store[RESOURCE_ENERGY] === 0) {
+                this.clearBuilderAssignment(creep);
+                return;
+            }
+        }
+    },
+    
+    /**
+     * Clear a builder assignment
+     * @param {Creep} creep - The hauler creep
+     */
+    clearBuilderAssignment: function(creep) {
+        if (creep.memory.assignedRequestId && 
+            creep.room.memory.energyRequests && 
+            creep.room.memory.energyRequests[creep.memory.assignedRequestId]) {
+            
+            // Clear the hauler assignment from the request
+            if (creep.room.memory.energyRequests[creep.memory.assignedRequestId].assignedHaulerId === creep.id) {
+                delete creep.room.memory.energyRequests[creep.memory.assignedRequestId].assignedHaulerId;
+            }
+        }
+        
+        // Clear the assignment from the hauler's memory
+        delete creep.memory.assignedRequestId;
+    },
+    
     findDeliveryTarget: function(creep) {
         const room = creep.room;
+        const roomManager = require('roomManager');
+        
+        // First check for builder energy requests
+        if (room.memory.energyRequests && Object.keys(room.memory.energyRequests).length > 0) {
+            // Find the highest priority builder request
+            let bestRequest = null;
+            let bestScore = Infinity;
+            
+            for (const requestId in room.memory.energyRequests) {
+                const request = room.memory.energyRequests[requestId];
+                
+                // Skip if already assigned to another hauler
+                if (request.assignedHaulerId && request.assignedHaulerId !== creep.id) {
+                    continue;
+                }
+                
+                // Calculate score based on priority and distance
+                const builder = Game.getObjectById(requestId);
+                if (!builder) {
+                    // Clean up invalid requests
+                    delete room.memory.energyRequests[requestId];
+                    continue;
+                }
+                
+                // Calculate score (lower is better)
+                const distance = creep.pos.getRangeTo(builder);
+                const score = request.priority + (distance * 0.5);
+                
+                if (score < bestScore) {
+                    bestScore = score;
+                    bestRequest = request;
+                }
+            }
+            
+            // If we found a suitable request, assign ourselves to it
+            if (bestRequest) {
+                room.memory.energyRequests[bestRequest.id].assignedHaulerId = creep.id;
+                creep.memory.assignedRequestId = bestRequest.id;
+                creep.memory.targetId = bestRequest.id;
+                return;
+            }
+        }
+        
+        // If no builder requests, proceed with normal delivery targets
         
         // Use cached room data if available
         if (room.memory.energyStructures && Game.time - (room.memory.energyStructuresTime || 0) < 10) {
@@ -75,7 +176,75 @@ const roleHauler = {
     },
     
     deliverEnergy: function(creep) {
-        // Use cached target if available
+        // Check if we're assigned to a builder request
+        if (creep.memory.assignedRequestId) {
+            const builder = Game.getObjectById(creep.memory.assignedRequestId);
+            const request = creep.room.memory.energyRequests && 
+                           creep.room.memory.energyRequests[creep.memory.assignedRequestId];
+            
+            // Validate builder and request still exist
+            if (!builder || !request) {
+                delete creep.memory.assignedRequestId;
+                delete creep.memory.targetId;
+                this.findDeliveryTarget(creep);
+                return;
+            }
+            
+            // Check if builder still needs energy
+            if (builder.store.getFreeCapacity(RESOURCE_ENERGY) === 0) {
+                // Builder is full, clear request and find new target
+                delete creep.room.memory.energyRequests[creep.memory.assignedRequestId];
+                delete creep.memory.assignedRequestId;
+                delete creep.memory.targetId;
+                this.findDeliveryTarget(creep);
+                return;
+            }
+            
+            // If builder has a target site, try to meet them there
+            let meetingPoint = null;
+            if (request.targetSite) {
+                const site = Game.getObjectById(request.targetSite.id);
+                if (site) {
+                    meetingPoint = site.pos;
+                }
+            }
+            
+            // If no meeting point, use builder's position
+            if (!meetingPoint) {
+                meetingPoint = builder.pos;
+            }
+            
+            // If we're adjacent to the builder, transfer energy
+            if (creep.pos.isNearTo(builder)) {
+                const result = creep.transfer(builder, RESOURCE_ENERGY);
+                if (result === OK) {
+                    // Successfully delivered energy
+                    creep.say('🔋');
+                    
+                    // Clear assignment if builder is now full
+                    if (builder.store.getFreeCapacity(RESOURCE_ENERGY) === 0) {
+                        delete creep.room.memory.energyRequests[creep.memory.assignedRequestId];
+                    } else {
+                        // Just clear our assignment but leave request for others
+                        delete creep.room.memory.energyRequests[creep.memory.assignedRequestId].assignedHaulerId;
+                    }
+                    
+                    delete creep.memory.assignedRequestId;
+                    delete creep.memory.targetId;
+                }
+            } else {
+                // Move to the builder or meeting point
+                creep.moveTo(meetingPoint, { 
+                    reusePath: 10,
+                    visualizePathStyle: {stroke: '#ffaa00'}
+                });
+                creep.say('🚚');
+            }
+            
+            return;
+        }
+        
+        // Regular energy delivery logic
         let target = creep.memory.targetId ? Game.getObjectById(creep.memory.targetId) : null;
         
         // Validate target still needs energy
@@ -88,12 +257,18 @@ const roleHauler = {
             // Handle controller separately
             if (target.structureType === STRUCTURE_CONTROLLER) {
                 if (creep.upgradeController(target) === ERR_NOT_IN_RANGE) {
-                    creep.moveTo(target, { reusePath: 10 });
+                    creep.moveTo(target, { 
+                        reusePath: 10,
+                        visualizePathStyle: {stroke: '#ffffff'}
+                    });
                 }
             } else {
                 // Transfer energy to structure
                 if (creep.transfer(target, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE) {
-                    creep.moveTo(target, { reusePath: 10 });
+                    creep.moveTo(target, { 
+                        reusePath: 10,
+                        visualizePathStyle: {stroke: '#ffffff'}
+                    });
                 }
             }
         }

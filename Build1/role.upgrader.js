@@ -16,14 +16,14 @@ const roleUpgrader = {
         // State switching with minimal operations
         if (creep.memory.upgrading && creep.store[RESOURCE_ENERGY] === 0) {
             creep.memory.upgrading = false;
-            creep.say('🔄 harvest');
+            creep.say('🔄');
             // Clear target cache when switching states
             delete creep.memory.energySourceId;
             delete creep.memory.sourcePos;
         }
         if (!creep.memory.upgrading && creep.store.getFreeCapacity() === 0) {
             creep.memory.upgrading = true;
-            creep.say('⚡ upgrade');
+            creep.say('⚡');
             // Cache controller position when switching to upgrading
             if (!creep.memory.controllerPos) {
                 creep.memory.controllerPos = {

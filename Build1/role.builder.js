@@ -20,6 +20,8 @@ const roleBuilder = {
             // Clear target cache when switching states
             delete creep.memory.targetId;
             delete creep.memory.targetPos;
+            // Register energy request when switching to harvesting
+            this.registerEnergyRequest(creep);
             console.log(`Builder ${creep.name} switching to harvesting mode`);
         }
         if (!creep.memory.building && creep.store.getFreeCapacity() === 0) {
@@ -28,7 +30,15 @@ const roleBuilder = {
             // Clear target cache when switching states
             delete creep.memory.energySourceId;
             delete creep.memory.sourcePos;
+            // Clear energy request when switching to building
+            this.clearEnergyRequest(creep);
             console.log(`Builder ${creep.name} switching to building mode`);
+        }
+        
+        // Register energy request if below 25% capacity while building
+        if (creep.memory.building && 
+            creep.store[RESOURCE_ENERGY] < creep.store.getCapacity() * 0.70) {
+            this.registerEnergyRequest(creep);
         }
         
         if (creep.memory.building) {
@@ -364,6 +374,120 @@ const roleBuilder = {
         
         // Not a valid target
         return false;
+    },
+    
+    /**
+     * Register an energy request for haulers to fulfill
+     * @param {Creep} creep - The builder creep requesting energy
+     */
+    registerEnergyRequest: function(creep) {
+        // Initialize the energy request registry if it doesn't exist
+        if (!creep.room.memory.energyRequests) {
+            creep.room.memory.energyRequests = {};
+        }
+        
+        // Get target site information if available
+        let targetSiteInfo = null;
+        if (creep.memory.targetId) {
+            const targetSite = Game.getObjectById(creep.memory.targetId);
+            if (targetSite) {
+                targetSiteInfo = {
+                    id: targetSite.id,
+                    pos: {
+                        x: targetSite.pos.x,
+                        y: targetSite.pos.y,
+                        roomName: targetSite.pos.roomName
+                    },
+                    structureType: targetSite.structureType
+                };
+            }
+        }
+        
+        // Create or update request
+        creep.room.memory.energyRequests[creep.id] = {
+            id: creep.id,
+            pos: {x: creep.pos.x, y: creep.pos.y, roomName: creep.room.name},
+            amount: creep.store.getFreeCapacity(RESOURCE_ENERGY),
+            timestamp: Game.time,
+            targetSite: targetSiteInfo,
+            priority: this.calculateRequestPriority(creep)
+        };
+    },
+    
+    /**
+     * Clear an energy request when no longer needed
+     * @param {Creep} creep - The builder creep clearing its request
+     */
+    clearEnergyRequest: function(creep) {
+        // Clear the request when no longer needed
+        if (creep.room.memory.energyRequests && 
+            creep.room.memory.energyRequests[creep.id]) {
+            delete creep.room.memory.energyRequests[creep.id];
+        }
+    },
+    
+    /**
+     * Calculate priority for energy requests
+     * @param {Creep} creep - The builder creep
+     * @returns {number} - Priority score (lower is higher priority)
+     */
+    calculateRequestPriority: function(creep) {
+        let priority = 50; // Base priority
+        
+        // If the builder has a target, adjust priority based on target type
+        if (creep.memory.targetId) {
+            const target = Game.getObjectById(creep.memory.targetId);
+            if (target) {
+                // Construction sites
+                if (target.progressTotal !== undefined) {
+                    // Prioritize by structure type
+                    if (target.structureType === STRUCTURE_SPAWN) {
+                        priority -= 30; // Highest priority
+                    } else if (target.structureType === STRUCTURE_EXTENSION) {
+                        priority -= 25;
+                    } else if (target.structureType === STRUCTURE_TOWER) {
+                        priority -= 20;
+                    } else if (target.structureType === STRUCTURE_CONTAINER) {
+                        priority -= 15;
+                    } else if (target.structureType === STRUCTURE_ROAD) {
+                        priority -= 10;
+                    }
+                    
+                    // Prioritize nearly complete structures
+                    const progressPercent = target.progress / target.progressTotal;
+                    if (progressPercent > 0.75) {
+                        priority -= 10; // Almost done, higher priority
+                    }
+                }
+                // Repair targets
+                else if (target.hits !== undefined && target.hitsMax !== undefined) {
+                    // Prioritize critical structures
+                    if (target.structureType === STRUCTURE_SPAWN || 
+                        target.structureType === STRUCTURE_TOWER) {
+                        priority -= 15;
+                    }
+                    
+                    // Prioritize severely damaged structures
+                    const healthPercent = target.hits / target.hitsMax;
+                    if (healthPercent < 0.25) {
+                        priority -= 10; // Severely damaged, higher priority
+                    }
+                }
+                // Controller
+                else if (target.structureType === STRUCTURE_CONTROLLER) {
+                    // Lower priority for controller upgrading
+                    priority += 10;
+                }
+            }
+        }
+        
+        // Adjust priority based on builder's energy level
+        const energyPercent = creep.store[RESOURCE_ENERGY] / creep.store.getCapacity();
+        if (energyPercent < 0.1) {
+            priority -= 15; // Almost empty, higher priority
+        }
+        
+        return priority;
     },
     
     /**

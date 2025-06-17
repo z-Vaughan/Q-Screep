@@ -152,6 +152,14 @@ const roomManager = {
         const activeSources = sources.filter(source => source.energy > 0).map(source => source.id);
         this.cache[room.name].activeSources = activeSources;
         this.cache[room.name].activeSourcesTime = Game.time;
+        
+        // Initialize energy request registry if it doesn't exist
+        if (!room.memory.energyRequests) {
+            room.memory.energyRequests = {};
+        }
+        
+        // Clean up stale energy requests
+        this.cleanupEnergyRequests(room);
         for (const source of sources) {
             // Count available mining positions if not already done
             if (!room.memory.sources[source.id]) {
@@ -352,6 +360,53 @@ const roomManager = {
         if (room && room.memory.sources && room.memory.sources[sourceId]) {
             room.memory.sources[sourceId].assignedHarvesters = 
                 Math.max(0, room.memory.sources[sourceId].assignedHarvesters - 1);
+        }
+    },
+    
+    /**
+     * Clean up stale energy requests
+     * @param {Room} room - The room to clean up requests for
+     */
+    cleanupEnergyRequests: function(room) {
+        if (!room.memory.energyRequests) return;
+        
+        const currentTime = Game.time;
+        const requestsToDelete = [];
+        
+        for (const requestId in room.memory.energyRequests) {
+            const request = room.memory.energyRequests[requestId];
+            
+            // Check if the request is stale (older than 50 ticks)
+            if (request.timestamp && currentTime - request.timestamp > 50) {
+                requestsToDelete.push(requestId);
+                continue;
+            }
+            
+            // Check if the target creep still exists
+            const targetCreep = Game.getObjectById(requestId);
+            if (!targetCreep) {
+                requestsToDelete.push(requestId);
+                continue;
+            }
+            
+            // Check if the target creep still needs energy
+            if (targetCreep.store.getFreeCapacity(RESOURCE_ENERGY) === 0) {
+                requestsToDelete.push(requestId);
+                continue;
+            }
+            
+            // Check if the assigned hauler still exists and is still assigned
+            if (request.assignedHaulerId) {
+                const hauler = Game.getObjectById(request.assignedHaulerId);
+                if (!hauler || hauler.memory.assignedRequestId !== requestId) {
+                    delete request.assignedHaulerId;
+                }
+            }
+        }
+        
+        // Delete all identified stale requests
+        for (const requestId of requestsToDelete) {
+            delete room.memory.energyRequests[requestId];
         }
     },
     
