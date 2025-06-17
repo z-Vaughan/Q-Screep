@@ -107,9 +107,9 @@ const spawnManager = {
         
         // Calculate work units needed
         const harvestWorkNeeded = sourceCount * 5; // Each source can support ~5 WORK parts
-        const constructionWorkNeeded = Math.min(5, constructionSites); // Cap at 5 work units
-        const repairWorkNeeded = Math.min(2, repairTargets); // Cap at 2 work units
-        const upgradeWorkNeeded = rcl <= 2 ? 2 : 3; // More upgraders at higher RCL
+        const constructionWorkNeeded = Math.min(8, constructionSites * 1.5); // Increased priority for construction
+        const repairWorkNeeded = Math.min(3, repairTargets); // Slightly increased repair priority
+        const upgradeWorkNeeded = rcl <= 2 ? 2 : (rcl >= 4 ? 4 : 3); // Scale upgraders with RCL
         
         // Calculate carry units needed
         const carryUnitsNeeded = sourceCount * 4; // Each source needs ~4 CARRY parts of transport
@@ -130,7 +130,10 @@ const spawnManager = {
         const maxHarvesters = Math.ceil(harvestWorkNeeded / 2);
         const maxHaulers = Math.ceil(carryUnitsNeeded / 3);
         const maxUpgraders = Math.ceil(upgradeWorkNeeded / 1);
-        const maxBuilders = Math.ceil((constructionWorkNeeded + repairWorkNeeded) / 1);
+        // Ensure we have enough builders when construction sites exist
+        const maxBuilders = constructionSites > 0 ? 
+            Math.max(2, Math.ceil((constructionWorkNeeded + repairWorkNeeded) / 1)) : 
+            Math.ceil((constructionWorkNeeded + repairWorkNeeded) / 1);
         
         // Total creep cap based on RCL
         const maxTotalCreeps = rcl <= 2 ? 10 : 15;
@@ -167,6 +170,33 @@ const spawnManager = {
             { role: 'builder', deficit: constructionSites > 0 ? builderDeficit : 0, max: maxBuilders, current: counts.builder },
             { role: 'upgrader', deficit: upgraderDeficit, max: maxUpgraders, current: counts.upgrader }
         ];
+        
+        // Apply priority modifiers based on RCL and construction needs
+        for (const priority of priorities) {
+            // Boost builder priority when we have construction sites
+            if (priority.role === 'builder' && constructionSites > 0) {
+                // Higher boost for more construction sites
+                const boost = Math.min(5, constructionSites);
+                priority.deficit += boost;
+                
+                // Extra boost for early RCL when extensions and containers are critical
+                if (rcl <= 3) {
+                    priority.deficit += 2;
+                }
+            }
+            
+            // Adjust upgrader priority based on RCL
+            if (priority.role === 'upgrader') {
+                // Lower upgrader priority when we have construction sites at low RCL
+                if (constructionSites > 0 && rcl <= 3) {
+                    priority.deficit -= 2;
+                }
+                // Boost upgrader priority at RCL 7 to reach RCL 8 faster
+                else if (rcl === 7) {
+                    priority.deficit += 3;
+                }
+            }
+        }
         
         // Sort by deficit (highest first) and filter out roles at max capacity
         priorities.sort((a, b) => b.deficit - a.deficit)
@@ -247,8 +277,8 @@ const spawnManager = {
                 break;
                 
             case 'builder':
-                // Balanced body for builders
-                body = this.createBalancedBody(energy, 1, 1, 1); // 1:1:1 ratio of WORK:CARRY:MOVE
+                // Slightly more WORK parts for builders to speed up construction
+                body = this.createBalancedBody(energy, 2, 2, 2); // 2:2:2 ratio of WORK:CARRY:MOVE
                 break;
         }
         
