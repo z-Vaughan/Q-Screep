@@ -191,13 +191,9 @@ const constructionManagerImpl = {
         // Calculate how many extensions we can build at current RCL
         const maxExtensions = CONTROLLER_STRUCTURES.extension[room.controller.level];
         
-        // Plan extension positions in a spiral pattern around spawn
+        // Plan extension positions
         const extensions = [];
         const terrain = room.getTerrain();
-        
-        // Start with a small offset from spawn
-        const startX = spawn.pos.x + 2;
-        const startY = spawn.pos.y + 2;
         
         // Create a Set of road positions for faster lookups
         const roadPositions = new Set();
@@ -206,6 +202,231 @@ const constructionManagerImpl = {
                 roadPositions.add(`${road.x},${road.y}`);
             }
         }
+        
+        // Find existing structures to avoid
+        const existingStructures = room.find(FIND_STRUCTURES);
+        const structurePositions = new Set();
+        for (const structure of existingStructures) {
+            structurePositions.add(`${structure.pos.x},${structure.pos.y}`);
+        }
+        
+        // Find sources and minerals to avoid
+        const sources = room.find(FIND_SOURCES);
+        const minerals = room.find(FIND_MINERALS);
+        const avoidPositions = [...sources, ...minerals].map(s => s.pos);
+        
+        // Find the room center for scoring
+        const roomCenterX = 25;
+        const roomCenterY = 25;
+        
+        // Create a cost matrix for pathfinding
+        const costMatrix = new PathFinder.CostMatrix();
+        
+        // Mark all walls as unwalkable
+        for (let x = 0; x < 50; x++) {
+            for (let y = 0; y < 50; y++) {
+                if (terrain.get(x, y) === TERRAIN_MASK_WALL) {
+                    costMatrix.set(x, y, 255);
+                }
+            }
+        }
+        
+        // Mark existing structures as unwalkable
+        for (const structure of existingStructures) {
+            if (structure.structureType !== STRUCTURE_ROAD) {
+                costMatrix.set(structure.pos.x, structure.pos.y, 255);
+            }
+        }
+        
+        // Mark areas around sources and minerals as unwalkable
+        for (const pos of avoidPositions) {
+            for (let dx = -1; dx <= 1; dx++) {
+                for (let dy = -1; dy <= 1; dy++) {
+                    const x = pos.x + dx;
+                    const y = pos.y + dy;
+                    if (x >= 0 && x < 50 && y >= 0 && y < 50) {
+                        costMatrix.set(x, y, 255);
+                    }
+                }
+            }
+        }
+        
+        // Generate candidate positions
+        const candidates = [];
+        
+        // Try multiple strategies for extension placement
+        
+        // Strategy 1: Cluster around spawn
+        this.generateClusterCandidates(spawn.pos, 2, 8, candidates, costMatrix, roadPositions);
+        
+        // Strategy 2: Place along roads
+        this.generateRoadAdjacentCandidates(room, roadPositions, candidates, costMatrix);
+        
+        // Strategy 3: Find open areas
+        this.generateOpenAreaCandidates(room, spawn.pos, candidates, costMatrix, roadPositions);
+        
+        // Score and sort candidates
+        for (const candidate of candidates) {
+            // Base score - prefer positions closer to spawn but not too close
+            const distToSpawn = Math.abs(candidate.x - spawn.pos.x) + Math.abs(candidate.y - spawn.pos.y);
+            candidate.score = 100 - Math.min(distToSpawn, 20);
+            
+            // Bonus for being near roads but not on them
+            let nearRoad = false;
+            for (let dx = -1; dx <= 1; dx++) {
+                for (let dy = -1; dy <= 1; dy++) {
+                    if (dx === 0 && dy === 0) continue;
+                    const roadKey = `${candidate.x + dx},${candidate.y + dy}`;
+                    if (roadPositions.has(roadKey)) {
+                        nearRoad = true;
+                        break;
+                    }
+                }
+            }
+            if (nearRoad) candidate.score += 20;
+            
+            // Penalty for being far from center
+            const distToCenter = Math.abs(candidate.x - roomCenterX) + Math.abs(candidate.y - roomCenterY);
+            candidate.score -= Math.min(distToCenter / 2, 15);
+            
+            // Bonus for being near other extensions (clustering)
+            let nearbyExtensions = 0;
+            for (const ext of extensions) {
+                const dist = Math.abs(candidate.x - ext.x) + Math.abs(candidate.y - ext.y);
+                if (dist <= 2) nearbyExtensions++;
+            }
+            candidate.score += nearbyExtensions * 5;
+        }
+        
+        // Sort by score (highest first)
+        candidates.sort((a, b) => b.score - a.score);
+        
+        // Take the best positions up to maxExtensions
+        for (let i = 0; i < candidates.length && extensions.length < maxExtensions; i++) {
+            const pos = candidates[i];
+            
+            // Final validation
+            if (pos.x >= 2 && pos.x <= 47 && pos.y >= 2 && pos.y <= 47 && 
+                terrain.get(pos.x, pos.y) !== TERRAIN_MASK_WALL &&
+                !roadPositions.has(`${pos.x},${pos.y}`) &&
+                !structurePositions.has(`${pos.x},${pos.y}`)) {
+                
+                extensions.push({ x: pos.x, y: pos.y });
+                
+                // Mark this position as taken
+                structurePositions.add(`${pos.x},${pos.y}`);
+            }
+        }
+        
+        // If we still don't have enough extensions, fall back to spiral pattern
+        if (extensions.length < maxExtensions) {
+            this.planExtensionsSpiral(room, spawn, extensions, maxExtensions, roadPositions, structurePositions);
+        }
+        
+        // Save extension plan to memory
+        room.memory.construction.extensions = {
+            planned: true,
+            positions: extensions,
+            count: 0
+        };
+        
+        console.log(`Planned ${extensions.length} extension positions in room ${room.name}`);
+    },
+    
+    /**
+     * Generate candidate positions in clusters around a point
+     */
+    generateClusterCandidates: function(centerPos, minRange, maxRange, candidates, costMatrix, roadPositions) {
+        for (let dx = -maxRange; dx <= maxRange; dx++) {
+            for (let dy = -maxRange; dy <= maxRange; dy++) {
+                const dist = Math.abs(dx) + Math.abs(dy);
+                if (dist < minRange || dist > maxRange) continue;
+                
+                const x = centerPos.x + dx;
+                const y = centerPos.y + dy;
+                
+                // Skip if out of bounds or unwalkable
+                if (x < 2 || x > 47 || y < 2 || y > 47 || costMatrix.get(x, y) === 255) continue;
+                
+                // Skip if on a road
+                if (roadPositions.has(`${x},${y}`)) continue;
+                
+                // Add as candidate
+                candidates.push({ x, y });
+            }
+        }
+    },
+    
+    /**
+     * Generate candidate positions adjacent to roads
+     */
+    generateRoadAdjacentCandidates: function(room, roadPositions, candidates, costMatrix) {
+        // Check positions adjacent to roads
+        for (const roadPosKey of roadPositions) {
+            const [roadX, roadY] = roadPosKey.split(',').map(Number);
+            
+            for (let dx = -1; dx <= 1; dx++) {
+                for (let dy = -1; dy <= 1; dy++) {
+                    if (dx === 0 && dy === 0) continue; // Skip the road itself
+                    
+                    const x = roadX + dx;
+                    const y = roadY + dy;
+                    
+                    // Skip if out of bounds or unwalkable
+                    if (x < 2 || x > 47 || y < 2 || y > 47 || costMatrix.get(x, y) === 255) continue;
+                    
+                    // Skip if on another road
+                    if (roadPositions.has(`${x},${y}`)) continue;
+                    
+                    // Add as candidate
+                    candidates.push({ x, y });
+                }
+            }
+        }
+    },
+    
+    /**
+     * Generate candidate positions in open areas
+     */
+    generateOpenAreaCandidates: function(room, centerPos, candidates, costMatrix, roadPositions) {
+        // Find open areas with good connectivity
+        for (let x = 5; x < 45; x += 2) {
+            for (let y = 5; y < 45; y += 2) {
+                // Skip if unwalkable
+                if (costMatrix.get(x, y) === 255) continue;
+                
+                // Skip if on a road
+                if (roadPositions.has(`${x},${y}`)) continue;
+                
+                // Check open space around this position
+                let openSpace = 0;
+                for (let dx = -2; dx <= 2; dx++) {
+                    for (let dy = -2; dy <= 2; dy++) {
+                        const nx = x + dx;
+                        const ny = y + dy;
+                        if (nx >= 0 && nx < 50 && ny >= 0 && ny < 50 && costMatrix.get(nx, ny) !== 255) {
+                            openSpace++;
+                        }
+                    }
+                }
+                
+                // Only consider positions with good open space
+                if (openSpace >= 15) {
+                    candidates.push({ x, y });
+                }
+            }
+        }
+    },
+    
+    /**
+     * Fall back to spiral pattern for extension placement
+     */
+    planExtensionsSpiral: function(room, spawn, extensions, maxExtensions, roadPositions, structurePositions) {
+        const terrain = room.getTerrain();
+        
+        // Start with a small offset from spawn
+        const startX = spawn.pos.x + 2;
+        const startY = spawn.pos.y + 2;
         
         // Spiral pattern variables
         let x = startX;
@@ -219,26 +440,20 @@ const constructionManagerImpl = {
         while (extensions.length < maxExtensions && steps < maxSteps * maxSteps) {
             // Check if position is valid for an extension
             if (x >= 2 && x <= 47 && y >= 2 && y <= 47 && 
-                terrain.get(x, y) !== TERRAIN_MASK_WALL) {
-                
-                // Check if position is not too close to other structures
-                let validPos = true;
-                
-                // Don't place extensions on roads
-                if (roadPositions.has(`${x},${y}`)) {
-                    validPos = false;
-                }
+                terrain.get(x, y) !== TERRAIN_MASK_WALL &&
+                !roadPositions.has(`${x},${y}`) &&
+                !structurePositions.has(`${x},${y}`)) {
                 
                 // Don't place too close to sources or minerals
-                if (validPos) {
-                    const nearbyObjects = room.lookForAtArea(LOOK_SOURCES, y-1, x-1, y+1, x+1, true);
-                    if (nearbyObjects.length > 0) {
-                        validPos = false;
-                    }
+                let validPos = true;
+                const nearbyObjects = room.lookForAtArea(LOOK_SOURCES, y-1, x-1, y+1, x+1, true);
+                if (nearbyObjects.length > 0) {
+                    validPos = false;
                 }
                 
                 if (validPos) {
                     extensions.push({ x, y });
+                    structurePositions.add(`${x},${y}`);
                 }
             }
             
@@ -254,15 +469,6 @@ const constructionManagerImpl = {
             y += dy;
             steps++;
         }
-        
-        // Save extension plan to memory
-        room.memory.construction.extensions = {
-            planned: true,
-            positions: extensions,
-            count: 0
-        };
-        
-        console.log(`Planned ${extensions.length} extension positions in room ${room.name}`);
     },
     
     /**
