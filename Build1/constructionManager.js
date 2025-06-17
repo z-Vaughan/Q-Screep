@@ -266,6 +266,33 @@ const constructionManagerImpl = {
     },
     
     /**
+     * Check if a position is safe from source keepers
+     * @param {Room} room - The room to check
+     * @param {RoomPosition|Object} pos - Position to check
+     * @param {number} safeDistance - Safe distance from keeper lairs
+     * @returns {boolean} - True if position is safe
+     */
+    isSafeFromSourceKeepers: function(room, pos, safeDistance = 5) {
+        // Find all source keeper lairs in the room
+        const keeperLairs = room.find(FIND_STRUCTURES, {
+            filter: s => s.structureType === STRUCTURE_KEEPER_LAIR
+        });
+        
+        // If no keeper lairs, position is safe
+        if (keeperLairs.length === 0) return true;
+        
+        // Check distance to each keeper lair
+        for (const lair of keeperLairs) {
+            const distance = Math.abs(lair.pos.x - pos.x) + Math.abs(lair.pos.y - pos.y);
+            if (distance <= safeDistance) {
+                return false; // Too close to a keeper lair
+            }
+        }
+        
+        return true; // Safe from all keeper lairs
+    },
+    
+    /**
      * Plan containers for the room
      * @param {Room} room - The room to plan containers for
      */
@@ -279,6 +306,12 @@ const constructionManagerImpl = {
         
         // Plan container near each source
         for (const source of sources) {
+            // Skip sources near source keeper lairs
+            if (!this.isSafeFromSourceKeepers(room, source.pos, 5)) {
+                console.log(`Skipping container planning for source at (${source.pos.x},${source.pos.y}) - too close to source keeper lair`);
+                continue;
+            }
+            
             // Find the best position for a container near the source
             let bestPos = null;
             let bestScore = -1;
@@ -717,7 +750,7 @@ const constructionManagerImpl = {
             siteMap.set(key, true);
         }
         
-        // Create container construction sites first (prioritizing containers over roads)
+        // Create container construction sites first (highest priority)
         if (room.memory.construction && room.memory.construction.containers && 
             room.memory.construction.containers.planned && 
             room.memory.construction.containers.positions) {
@@ -755,7 +788,56 @@ const constructionManagerImpl = {
             room.memory.construction.containers.positions = newContainerPositions;
         }
         
-        // Create road construction sites after containers
+        // Create extension construction sites next (second priority)
+        if (room.controller.level >= 2 && room.memory.construction && 
+            room.memory.construction.extensions && 
+            room.memory.construction.extensions.planned && 
+            room.memory.construction.extensions.positions && sitesPlaced < sitesToPlace) {
+            
+            const extensionPositions = room.memory.construction.extensions.positions;
+            const maxExtensions = CONTROLLER_STRUCTURES[STRUCTURE_EXTENSION][room.controller.level];
+            const currentExtensions = room.memory.construction.extensions.count || 0;
+            const newExtensionPositions = [];
+            
+            // Only create extensions if we haven't reached the limit
+            if (currentExtensions < maxExtensions) {
+                let newExtensionsCount = 0;
+                
+                for (let i = 0; i < extensionPositions.length && sitesPlaced < sitesToPlace; i++) {
+                    const pos = extensionPositions[i];
+                    
+                    // Check if there's already an extension or construction site here
+                    const extensionKey = `${pos.x},${pos.y},${STRUCTURE_EXTENSION}`;
+                    const hasExtension = structureMap.has(extensionKey);
+                    const hasExtensionSite = siteMap.has(extensionKey);
+                    
+                    // Create extension construction site if needed
+                    if (!hasExtension && !hasExtensionSite && currentExtensions + newExtensionsCount < maxExtensions) {
+                        const result = room.createConstructionSite(pos.x, pos.y, STRUCTURE_EXTENSION);
+                        if (result === OK) {
+                            sitesPlaced++;
+                            newExtensionsCount++;
+                            console.log(`Created extension construction site at (${pos.x},${pos.y})`);
+                            
+                            // Add to site map to prevent duplicates
+                            siteMap.set(extensionKey, true);
+                        }
+                    }
+                    
+                    // Keep this position in the plan if extension doesn't exist yet
+                    if (!hasExtension) {
+                        newExtensionPositions.push(pos);
+                    } else {
+                        room.memory.construction.extensions.count = (room.memory.construction.extensions.count || 0) + 1;
+                    }
+                }
+                
+                // Update extension positions in memory
+                room.memory.construction.extensions.positions = newExtensionPositions;
+            }
+        }
+        
+        // Create road construction sites after containers and extensions (third priority)
         if (room.memory.construction && room.memory.construction.roads && 
             room.memory.construction.roads.planned && 
             room.memory.construction.roads.positions && sitesPlaced < sitesToPlace) {
@@ -854,52 +936,7 @@ const constructionManagerImpl = {
             room.memory.construction.roads.positions = newRoadPositions;
         }
         
-        // Container construction sites are now created before roads
-        
-        // Create extension construction sites if we have capacity
-        if (room.controller.level >= 2 && room.memory.construction && 
-            room.memory.construction.extensions && 
-            room.memory.construction.extensions.planned && 
-            room.memory.construction.extensions.positions) {
-            
-            const extensionPositions = room.memory.construction.extensions.positions;
-            const maxExtensions = CONTROLLER_STRUCTURES[STRUCTURE_EXTENSION][room.controller.level];
-            const currentExtensions = room.memory.construction.extensions.count || 0;
-            const newExtensionPositions = [];
-            
-            // Only create extensions if we haven't reached the limit
-            if (currentExtensions < maxExtensions) {
-                let newExtensionsCount = 0;
-                
-                for (let i = 0; i < extensionPositions.length && sitesPlaced < sitesToPlace; i++) {
-                    const pos = extensionPositions[i];
-                    
-                    // Check if there's already an extension or construction site here
-                    const extensionKey = `${pos.x},${pos.y},${STRUCTURE_EXTENSION}`;
-                    const hasExtension = structureMap.has(extensionKey);
-                    const hasExtensionSite = siteMap.has(extensionKey);
-                    
-                    // Create extension construction site if needed
-                    if (!hasExtension && !hasExtensionSite && currentExtensions + newExtensionsCount < maxExtensions) {
-                        const result = room.createConstructionSite(pos.x, pos.y, STRUCTURE_EXTENSION);
-                        if (result === OK) {
-                            sitesPlaced++;
-                            newExtensionsCount++;
-                        }
-                    }
-                    
-                    // Keep this position in the plan if extension doesn't exist yet
-                    if (!hasExtension) {
-                        newExtensionPositions.push(pos);
-                    } else {
-                        room.memory.construction.extensions.count = (room.memory.construction.extensions.count || 0) + 1;
-                    }
-                }
-                
-                // Update extension positions in memory
-                room.memory.construction.extensions.positions = newExtensionPositions;
-            }
-        }
+        // Extensions are now created before roads
         
         // Create tower construction sites if we have capacity
         if (room.controller.level >= 3 && room.memory.construction && 
