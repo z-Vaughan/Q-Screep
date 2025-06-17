@@ -176,8 +176,7 @@ const utils = {
         
         // Full bucket, run everything
         return true;
-    }
-};
+    },
 
     /**
      * Safe object access to prevent errors from undefined properties
