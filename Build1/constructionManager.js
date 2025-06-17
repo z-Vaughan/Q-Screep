@@ -601,21 +601,6 @@ const constructionManagerImpl = {
         // Find all construction sites in the room
         const sites = room.find(FIND_CONSTRUCTION_SITES);
         
-        // Log construction site count every 20 ticks
-        if (Game.time % 50 === 0) {
-            const sitesByType = {};
-            for (const site of sites) {
-                sitesByType[site.structureType] = (sitesByType[site.structureType] || 0) + 1;
-            }
-            
-            let siteInfo = '';
-            for (const type in sitesByType) {
-                siteInfo += `${sitesByType[type]} ${type} `;
-            }
-            
-            console.log(`Room ${room.name} construction: ${sites.length} sites - ${siteInfo}`);
-        }
-        
         // Update room memory
         room.memory.constructionSites = sites.length;
         room.memory.constructionSiteIds = sites.map(site => site.id);
@@ -732,10 +717,48 @@ const constructionManagerImpl = {
             siteMap.set(key, true);
         }
         
-        // Create road construction sites first
+        // Create container construction sites first (prioritizing containers over roads)
+        if (room.memory.construction && room.memory.construction.containers && 
+            room.memory.construction.containers.planned && 
+            room.memory.construction.containers.positions) {
+            
+            const containerPositions = room.memory.construction.containers.positions;
+            const newContainerPositions = [];
+            
+            for (let i = 0; i < containerPositions.length && sitesPlaced < sitesToPlace; i++) {
+                const pos = containerPositions[i];
+                
+                // Check if there's already a container or construction site here
+                const containerKey = `${pos.x},${pos.y},${STRUCTURE_CONTAINER}`;
+                const hasContainer = structureMap.has(containerKey);
+                const hasContainerSite = siteMap.has(containerKey);
+                
+                // Create container construction site if needed
+                if (!hasContainer && !hasContainerSite) {
+                    const result = room.createConstructionSite(pos.x, pos.y, STRUCTURE_CONTAINER);
+                    if (result === OK) {
+                        sitesPlaced++;
+                        console.log(`Created container construction site at (${pos.x},${pos.y})`);
+                        
+                        // Add to site map to prevent duplicates
+                        siteMap.set(containerKey, true);
+                    }
+                }
+                
+                // Keep this position in the plan if container doesn't exist yet
+                if (!hasContainer) {
+                    newContainerPositions.push(pos);
+                }
+            }
+            
+            // Update container positions in memory
+            room.memory.construction.containers.positions = newContainerPositions;
+        }
+        
+        // Create road construction sites after containers
         if (room.memory.construction && room.memory.construction.roads && 
             room.memory.construction.roads.planned && 
-            room.memory.construction.roads.positions) {
+            room.memory.construction.roads.positions && sitesPlaced < sitesToPlace) {
             
             const roadPositions = room.memory.construction.roads.positions;
             const newRoadPositions = [];
@@ -831,39 +854,7 @@ const constructionManagerImpl = {
             room.memory.construction.roads.positions = newRoadPositions;
         }
         
-        // Create container construction sites if we have capacity
-        if (room.memory.construction && room.memory.construction.containers && 
-            room.memory.construction.containers.planned && 
-            room.memory.construction.containers.positions) {
-            
-            const containerPositions = room.memory.construction.containers.positions;
-            const newContainerPositions = [];
-            
-            for (let i = 0; i < containerPositions.length && sitesPlaced < sitesToPlace; i++) {
-                const pos = containerPositions[i];
-                
-                // Check if there's already a container or construction site here
-                const containerKey = `${pos.x},${pos.y},${STRUCTURE_CONTAINER}`;
-                const hasContainer = structureMap.has(containerKey);
-                const hasContainerSite = siteMap.has(containerKey);
-                
-                // Create container construction site if needed
-                if (!hasContainer && !hasContainerSite) {
-                    const result = room.createConstructionSite(pos.x, pos.y, STRUCTURE_CONTAINER);
-                    if (result === OK) {
-                        sitesPlaced++;
-                    }
-                }
-                
-                // Keep this position in the plan if container doesn't exist yet
-                if (!hasContainer) {
-                    newContainerPositions.push(pos);
-                }
-            }
-            
-            // Update container positions in memory
-            room.memory.construction.containers.positions = newContainerPositions;
-        }
+        // Container construction sites are now created before roads
         
         // Create extension construction sites if we have capacity
         if (room.controller.level >= 2 && room.memory.construction && 

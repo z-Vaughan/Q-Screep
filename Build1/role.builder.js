@@ -175,7 +175,7 @@ const roleBuilder = {
             }
             
             if (sites.length > 0) {
-                // Prioritize certain structure types
+                // Prioritize certain structure types (containers before roads)
                 const priorityOrder = [STRUCTURE_SPAWN, STRUCTURE_EXTENSION, STRUCTURE_TOWER, STRUCTURE_CONTAINER, STRUCTURE_ROAD];
                 
                 // Sort sites by priority
@@ -217,15 +217,38 @@ const roleBuilder = {
         
         // If no construction sites, look for repair targets
         if (!target) {
-            // Prioritize critical structures (roads, containers)
+            // Prioritize critical structures (containers over roads)
             const repairTargets = creep.room.find(FIND_STRUCTURES, {
                 filter: s => s.hits < s.hitsMax * 0.5 && // Only repair if below 50%
                           s.hits < 10000 && // Don't repair walls/ramparts beyond this in early game
-                          (s.structureType === STRUCTURE_ROAD || 
-                           s.structureType === STRUCTURE_CONTAINER || 
+                          (s.structureType === STRUCTURE_CONTAINER || 
                            s.structureType === STRUCTURE_SPAWN ||
-                           s.structureType === STRUCTURE_EXTENSION)
+                           s.structureType === STRUCTURE_EXTENSION ||
+                           s.structureType === STRUCTURE_ROAD)
             });
+            
+            // Sort repair targets to prioritize containers over roads
+            if (repairTargets.length > 0) {
+                repairTargets.sort((a, b) => {
+                    // Prioritize by structure type
+                    const typeOrder = {
+                        [STRUCTURE_SPAWN]: 1,
+                        [STRUCTURE_EXTENSION]: 2,
+                        [STRUCTURE_CONTAINER]: 3,
+                        [STRUCTURE_ROAD]: 4
+                    };
+                    
+                    const aOrder = typeOrder[a.structureType] || 5;
+                    const bOrder = typeOrder[b.structureType] || 5;
+                    
+                    if (aOrder !== bOrder) {
+                        return aOrder - bOrder;
+                    }
+                    
+                    // If same type, prioritize by damage percentage
+                    return (a.hits / a.hitsMax) - (b.hits / b.hitsMax);
+                });
+            }
             
             if (repairTargets.length > 0) {
                 target = this.findClosestByRange(creep, repairTargets);
@@ -465,7 +488,7 @@ const roleBuilder = {
                     } else if (target.structureType === STRUCTURE_TOWER) {
                         priority -= 20;
                     } else if (target.structureType === STRUCTURE_CONTAINER) {
-                        priority -= 15;
+                        priority -= 18; // Increased priority for containers
                     } else if (target.structureType === STRUCTURE_ROAD) {
                         priority -= 10;
                     }
