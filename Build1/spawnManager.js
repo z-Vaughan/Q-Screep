@@ -13,16 +13,15 @@ const spawnManager = {
      * @param {Room} room - The room to manage spawning for
      */
     run: function(room) {
-        // Skip if no energy available
-        if (room.energyAvailable < 250) return;
+        const utils = require('utils');
         
-        // Find all spawns in the room - use cached data if available
-        const spawns = room.find(FIND_MY_SPAWNS);
-        if (spawns.length === 0) return;
-        
-        // Use the first available spawn
-        for (const spawn of spawns) {
-            if (spawn.spawning) continue;
+        try {
+            // Skip if no energy available for even the smallest creep
+            if (room.energyAvailable < 250) return;
+            
+            // Find all spawns in the room - use cached data if available
+            const spawns = room.find(FIND_MY_SPAWNS);
+            if (spawns.length === 0) return;
             
             // Get creep counts from room manager cache
             const counts = roomManager.getRoomData(room.name, 'creepCounts') || {
@@ -33,17 +32,58 @@ const spawnManager = {
                 total: 0
             };
             
-            // Emergency recovery - if no harvesters, spawn one immediately
-            if (counts.harvester === 0) {
-                this.spawnCreep(spawn, 'harvester', room.energyAvailable);
-                return;
+            // Colony collapse prevention - if critical roles are missing, force spawn
+            const criticalCollapse = counts.harvester === 0 || 
+                                    (counts.harvester > 0 && counts.hauler === 0);
+            
+            // In emergency mode, only spawn critical creeps unless we're in collapse prevention
+            if (global.emergencyMode && !criticalCollapse) {
+                if (global.emergencyMode.level === 'critical') return;
+                
+                // In high emergency, only spawn if we have very few creeps
+                if (counts.total > 5) return;
             }
             
-            // Determine what role we need most
-            const neededRole = this.getNeededRole(room, counts);
-            if (neededRole) {
-                // Spawn the largest creep we can afford
-                this.spawnCreep(spawn, neededRole, room.energyAvailable);
+            // Use the first available spawn
+            for (const spawn of spawns) {
+                if (spawn.spawning) continue;
+                
+                // Emergency recovery - if no harvesters, spawn one immediately
+                if (counts.harvester === 0) {
+                    this.spawnCreep(spawn, 'harvester', room.energyAvailable);
+                    return;
+                }
+                
+                // Emergency recovery - if no haulers but we have harvesters, spawn hauler
+                if (counts.harvester > 0 && counts.hauler === 0) {
+                    this.spawnCreep(spawn, 'hauler', room.energyAvailable);
+                    return;
+                }
+                
+                // Normal spawning - only if CPU conditions allow
+                if (utils.shouldExecute('medium')) {
+                    // Determine what role we need most
+                    const neededRole = this.getNeededRole(room, counts);
+                    if (neededRole) {
+                        // In emergency mode, spawn smaller creeps to save energy
+                        const energyToUse = global.emergencyMode ? 
+                            Math.min(room.energyAvailable, room.energyCapacityAvailable * 0.7) : 
+                            room.energyAvailable;
+                            
+                        // Spawn the appropriate creep
+                        this.spawnCreep(spawn, neededRole, energyToUse);
+                    }
+                }
+            }
+        } catch (error) {
+            console.log(`Error in spawnManager.run for room ${room.name}: ${error}`);
+            
+            // Emergency recovery - try to spawn a basic harvester if we have any spawn available
+            const spawn = room.find(FIND_MY_SPAWNS)[0];
+            if (spawn && !spawn.spawning && room.energyAvailable >= 250) {
+                spawn.spawnCreep([WORK, CARRY, MOVE], 'emergency' + Game.time, {
+                    memory: { role: 'harvester', homeRoom: room.name }
+                });
             }
         }
     },

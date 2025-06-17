@@ -141,10 +141,100 @@ const utils = {
             Total: ${stats.total.toFixed(2)}
             Room Management: ${stats.roomManagement.toFixed(2)}
             Creep Actions: ${stats.creepActions.toFixed(2)}
+            Defense: ${stats.defense ? stats.defense.toFixed(2) : '0.00'}
             Spawning: ${stats.spawning.toFixed(2)}
             Construction: ${stats.construction.toFixed(2)}
             Memory Cleanup: ${stats.memoryCleanup.toFixed(2)}
-            Bucket: ${Game.cpu.bucket}`);
+            Emergency Mode: ${stats.emergencyMode || 'off'}
+            Bucket: ${stats.bucket}`);
+    },
+    
+    /**
+     * Check if an operation should be executed based on current CPU conditions
+     * @param {string} priority - Priority level ('critical', 'high', 'medium', 'low')
+     * @returns {boolean} - Whether the operation should proceed
+     */
+    shouldExecute: function(priority) {
+        // Always execute critical operations
+        if (priority === 'critical') return true;
+        
+        // In emergency mode, only run critical operations
+        if (global.emergencyMode) {
+            if (global.emergencyMode.level === 'critical') {
+                return priority === 'critical';
+            } else {
+                return ['critical', 'high'].includes(priority);
+            }
+        }
+        
+        // Normal mode - CPU bucket based throttling
+        const bucket = Game.cpu.bucket;
+        
+        if (bucket < 1000) return priority === 'critical';
+        if (bucket < 3000) return ['critical', 'high'].includes(priority);
+        if (bucket < 7000) return !['low'].includes(priority);
+        
+        // Full bucket, run everything
+        return true;
+    }
+};
+
+    /**
+     * Safe object access to prevent errors from undefined properties
+     * @param {Object} obj - The object to access
+     * @param {string} path - The property path (e.g., 'a.b.c')
+     * @param {*} defaultValue - Default value if path doesn't exist
+     * @returns {*} - The value at the path or the default value
+     */
+    getNestedProperty: function(obj, path, defaultValue = undefined) {
+        if (!obj || !path) return defaultValue;
+        
+        const properties = path.split('.');
+        let value = obj;
+        
+        for (const prop of properties) {
+            if (value === null || value === undefined || typeof value !== 'object') {
+                return defaultValue;
+            }
+            value = value[prop];
+        }
+        
+        return value !== undefined ? value : defaultValue;
+    },
+    
+    /**
+     * Safely execute a function with error handling
+     * @param {function} fn - Function to execute
+     * @param {Object} context - Context to bind the function to
+     * @param {Array} args - Arguments to pass to the function
+     * @param {*} defaultValue - Default value to return on error
+     * @returns {*} - Result of the function or default value on error
+     */
+    safeExec: function(fn, context, args = [], defaultValue = null) {
+        try {
+            return fn.apply(context, args);
+        } catch (error) {
+            console.log(`Error in safeExec: ${error}`);
+            return defaultValue;
+        }
+    },
+    
+    /**
+     * Track errors to prevent log spam
+     * @param {string} key - Error identifier
+     * @param {string} message - Error message
+     * @param {number} interval - How often to log this error (in ticks)
+     */
+    logError: function(key, message, interval = 100) {
+        if (!global.errorLog) global.errorLog = {};
+        
+        const now = Game.time;
+        const lastLogged = global.errorLog[key] || 0;
+        
+        if (now - lastLogged >= interval) {
+            console.log(`ERROR [${key}]: ${message}`);
+            global.errorLog[key] = now;
+        }
     }
 };
 

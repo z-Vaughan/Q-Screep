@@ -10,42 +10,64 @@ const roomManager = {
      * @param {Room} room - The room to analyze
      */
     updateRoomData: function(room) {
-        // Initialize cache for this room if needed
-        if (!this.cache[room.name]) {
-            this.cache[room.name] = {};
-        }
+        const utils = require('utils');
         
-        // Initialize room memory if needed
-        if (!room.memory.sources) {
-            room.memory.sources = {};
-            room.memory.lastUpdate = 0;
-        }
-        
-        // Only do a full update every 20 ticks to save CPU
-        const fullUpdateInterval = 20;
-        const needsFullUpdate = Game.time - room.memory.lastUpdate >= fullUpdateInterval;
-        
-        // Always update these critical values every tick
-        this.cache[room.name].energyAvailable = room.energyAvailable;
-        this.cache[room.name].energyCapacityAvailable = room.energyCapacityAvailable;
-        
-        // Count creeps by role (only once per tick)
-        if (!this.cache.creepCounts || Game.time !== (this.cache.creepCountsTime || 0)) {
-            this.cache.creepCounts = this.countCreepsByRole();
-            this.cache.creepCountsTime = Game.time;
-        }
-        
-        // Get creep counts for this room
-        this.cache[room.name].creepCounts = this.cache.creepCounts[room.name] || {
-            harvester: 0, hauler: 0, upgrader: 0, builder: 0, total: 0
-        };
-        
-        // Calculate energy needs
-        this.calculateEnergyNeeds(room);
-        
-        // Perform full update when needed
-        if (needsFullUpdate) {
-            this.performFullUpdate(room);
+        try {
+            // Initialize cache for this room if needed
+            if (!this.cache[room.name]) {
+                this.cache[room.name] = {};
+            }
+            
+            // Initialize room memory if needed
+            if (!room.memory.sources) {
+                room.memory.sources = {};
+                room.memory.lastUpdate = 0;
+            }
+            
+            // Determine update frequency based on CPU conditions
+            let fullUpdateInterval = 20; // Default interval
+            
+            // Adjust interval based on emergency mode
+            if (global.emergencyMode) {
+                fullUpdateInterval = global.emergencyMode.level === 'critical' ? 100 : 50;
+            } else if (Game.cpu.bucket < 3000) {
+                fullUpdateInterval = 40;
+            }
+            
+            const needsFullUpdate = Game.time - room.memory.lastUpdate >= fullUpdateInterval;
+            
+            // Always update these critical values every tick
+            this.cache[room.name].energyAvailable = room.energyAvailable;
+            this.cache[room.name].energyCapacityAvailable = room.energyCapacityAvailable;
+            
+            // Count creeps by role (only once per tick)
+            if (!this.cache.creepCounts || Game.time !== (this.cache.creepCountsTime || 0)) {
+                this.cache.creepCounts = this.countCreepsByRole();
+                this.cache.creepCountsTime = Game.time;
+            }
+            
+            // Get creep counts for this room
+            this.cache[room.name].creepCounts = this.cache.creepCounts[room.name] || {
+                harvester: 0, hauler: 0, upgrader: 0, builder: 0, total: 0
+            };
+            
+            // Calculate energy needs - always needed for proper functioning
+            this.calculateEnergyNeeds(room);
+            
+            // Perform full update when needed and CPU allows
+            if (needsFullUpdate && utils.shouldExecute('medium')) {
+                this.performFullUpdate(room);
+            }
+        } catch (error) {
+            console.log(`Error in roomManager.updateRoomData for room ${room.name}: ${error}`);
+            // Ensure we have at least basic data in cache
+            if (!this.cache[room.name]) {
+                this.cache[room.name] = {
+                    energyAvailable: room.energyAvailable,
+                    energyCapacityAvailable: room.energyCapacityAvailable,
+                    creepCounts: { harvester: 0, hauler: 0, upgrader: 0, builder: 0, total: 0 }
+                };
+            }
         }
         
         // Write critical data to memory at the end of the tick
@@ -219,12 +241,24 @@ const roomManager = {
      * @returns {Source|null} - The best source or null if none available
      */
     getBestSource: function(room) {
+        // Safety check for room memory
+        if (!room || !room.memory || !room.memory.sources) {
+            return null;
+        }
+        
         // Find sources with available spots
         for (const sourceId in room.memory.sources) {
             const sourceMemory = room.memory.sources[sourceId];
-            if (sourceMemory.assignedHarvesters < sourceMemory.availableSpots) {
-                sourceMemory.assignedHarvesters++;
-                return Game.getObjectById(sourceId);
+            if (sourceMemory && sourceMemory.assignedHarvesters < sourceMemory.availableSpots) {
+                // Verify source still exists before assigning
+                const source = Game.getObjectById(sourceId);
+                if (source) {
+                    sourceMemory.assignedHarvesters++;
+                    return source;
+                } else {
+                    // Source no longer exists, clean up memory
+                    delete room.memory.sources[sourceId];
+                }
             }
         }
         return null;

@@ -8,14 +8,20 @@ const constructionManager = {
      * @param {Room} room - The room to manage construction for
      */
     run: function(room) {
+        const utils = require('utils');
+        
         // Only run every 100 ticks to save CPU - construction is not time-critical
-        if (Game.time % 100 !== 0) return;
+        // In emergency mode, run even less frequently
+        const interval = global.emergencyMode ? 
+            (global.emergencyMode.level === 'critical' ? 500 : 200) : 100;
+            
+        if (Game.time % interval !== 0) return;
         
         // Skip if we don't own the controller
         if (!room.controller || !room.controller.my) return;
         
-        // Skip if CPU is low
-        if (Game.cpu.bucket < 3000) return;
+        // Skip if CPU conditions don't allow for construction tasks
+        if (!utils.shouldExecute('low')) return;
         
         // Initialize construction memory if needed
         if (!room.memory.construction) {
@@ -198,12 +204,22 @@ const constructionManager = {
      * @param {Room} room - The room to create construction sites in
      */
     createConstructionSites: function(room) {
+        // Check for global construction site limit
+        const globalSiteCount = Object.keys(Game.constructionSites).length;
+        const MAX_SITES_PER_ROOM = 5;
+        const MAX_GLOBAL_SITES = 100; // Game limit is 100
+        
+        if (globalSiteCount >= MAX_GLOBAL_SITES) return;
+        
         // Limit the number of construction sites to avoid CPU spikes
         const existingSites = room.find(FIND_CONSTRUCTION_SITES);
-        if (existingSites.length >= 5) return;
+        if (existingSites.length >= MAX_SITES_PER_ROOM) return;
         
         // How many more sites we can place
-        const sitesToPlace = 5 - existingSites.length;
+        const sitesToPlace = Math.min(
+            MAX_SITES_PER_ROOM - existingSites.length,
+            MAX_GLOBAL_SITES - globalSiteCount
+        );
         let sitesPlaced = 0;
         
         // Create a map of existing structures for faster lookups
