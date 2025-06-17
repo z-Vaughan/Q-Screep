@@ -132,15 +132,31 @@ const roleHarvester = {
             return;
         }
         
-        // Check for source keepers near the source
+        // Check for source keepers near the source - use cached check
         if (Game.time % 10 === 0) { // Only check occasionally to save CPU
-            const sourcePos = new RoomPosition(
-                source.pos.x, 
-                source.pos.y, 
-                source.pos.roomName
-            );
+            // Use cached result if available
+            const safetyKey = `source_safety_${source.id}_${Math.floor(Game.time/100)}`;
+            let isSafe;
             
-            if (!utils.isSafeFromKeepers(sourcePos)) {
+            if (global.sourceCache && global.sourceCache[safetyKey] !== undefined) {
+                isSafe = global.sourceCache[safetyKey];
+            } else {
+                // Initialize cache if needed
+                if (!global.sourceCache) global.sourceCache = {};
+                
+                const sourcePos = new RoomPosition(
+                    source.pos.x, 
+                    source.pos.y, 
+                    source.pos.roomName
+                );
+                
+                isSafe = utils.isSafeFromKeepers(sourcePos);
+                
+                // Cache result for 100 ticks
+                global.sourceCache[safetyKey] = isSafe;
+            }
+            
+            if (!isSafe) {
                 // Source is near a keeper, release it and find a new one
                 utils.logError(`harvester_keeper_${creep.name}`, 
                     `Source ${source.id} is near a Source Keeper, abandoning`, 200);

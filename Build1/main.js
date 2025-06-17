@@ -164,59 +164,102 @@ module.exports.loop = function() {
     if (currentTick % 20 === 0) {
         const memStart = Game.cpu.getUsed();
         
-        // Clean up dead creeps from memory
-        for (const name in Memory.creeps) {
-            if (!Game.creeps[name]) {
-                // If creep had a source assigned, release it
-                if (Memory.creeps[name].sourceId && Memory.creeps[name].homeRoom) {
-                    try {
-                        roomManager.releaseSource(Memory.creeps[name].sourceId, Memory.creeps[name].homeRoom);
-                    } catch (e) {
-                        console.log(`Error releasing source for dead creep ${name}: ${e}`);
-                    }
-                }
-                delete Memory.creeps[name];
-            }
+        // Process memory cleanup in chunks to distribute CPU load
+        if (!global.memoryCleanupState) {
+            global.memoryCleanupState = {
+                phase: 'creeps',
+                creepNames: Object.keys(Memory.creeps),
+                roomNames: Object.keys(Memory.rooms),
+                creepIndex: 0,
+                roomIndex: 0
+            };
         }
         
-        // Validate room memory structure
-        for (const roomName in Memory.rooms) {
-            if (!Game.rooms[roomName] || !Game.rooms[roomName].controller || !Game.rooms[roomName].controller.my) {
-                // Room is not visible or not owned, keep minimal data
-                if (Memory.rooms[roomName]) {
-                    const reservationStatus = Memory.rooms[roomName].reservation;
-                    Memory.rooms[roomName] = { 
-                        lastSeen: Game.time,
-                        reservation: reservationStatus
-                    };
+        const state = global.memoryCleanupState;
+        const ITEMS_PER_BATCH = 10;
+        
+        if (state.phase === 'creeps') {
+            // Process a batch of creeps
+            const endIdx = Math.min(state.creepIndex + ITEMS_PER_BATCH, state.creepNames.length);
+            
+            for (let i = state.creepIndex; i < endIdx; i++) {
+                const name = state.creepNames[i];
+                if (!Game.creeps[name]) {
+                    // If creep had a source assigned, release it
+                    if (Memory.creeps[name].sourceId && Memory.creeps[name].homeRoom) {
+                        try {
+                            roomManager.releaseSource(Memory.creeps[name].sourceId, Memory.creeps[name].homeRoom);
+                        } catch (e) {
+                            console.log(`Error releasing source for dead creep ${name}: ${e}`);
+                        }
+                    }
+                    delete Memory.creeps[name];
                 }
-            } else {
-                // Ensure critical memory structures exist
-                if (!Memory.rooms[roomName].sources) Memory.rooms[roomName].sources = {};
-                if (!Memory.rooms[roomName].construction) {
-                    Memory.rooms[roomName].construction = {
-                        roads: { planned: false },
-                        extensions: { planned: false, count: 0 },
-                        lastUpdate: 0
-                    };
+            }
+            
+            state.creepIndex = endIdx;
+            
+            // If we've processed all creeps, move to rooms phase
+            if (state.creepIndex >= state.creepNames.length) {
+                state.phase = 'rooms';
+                state.creepIndex = 0;
+            }
+        } else if (state.phase === 'rooms') {
+            // Process a batch of rooms
+            const endIdx = Math.min(state.roomIndex + ITEMS_PER_BATCH, state.roomNames.length);
+            
+            for (let i = state.roomIndex; i < endIdx; i++) {
+                const roomName = state.roomNames[i];
+                if (!Game.rooms[roomName] || !Game.rooms[roomName].controller || !Game.rooms[roomName].controller.my) {
+                    // Room is not visible or not owned, keep minimal data
+                    if (Memory.rooms[roomName]) {
+                        const reservationStatus = Memory.rooms[roomName].reservation;
+                        Memory.rooms[roomName] = { 
+                            lastSeen: Game.time,
+                            reservation: reservationStatus
+                        };
+                    }
+                } else {
+                    // Ensure critical memory structures exist
+                    if (!Memory.rooms[roomName].sources) Memory.rooms[roomName].sources = {};
+                    if (!Memory.rooms[roomName].construction) {
+                        Memory.rooms[roomName].construction = {
+                            roads: { planned: false },
+                            extensions: { planned: false, count: 0 },
+                            lastUpdate: 0
+                        };
+                    }
                 }
+            }
+            
+            state.roomIndex = endIdx;
+            
+            // If we've processed all rooms, reset state for next time
+            if (state.roomIndex >= state.roomNames.length) {
+                global.memoryCleanupState = null;
             }
         }
         
         global.stats.cpu.memoryCleanup = Game.cpu.getUsed() - memStart;
     }
     
-    // Process each room we control
-    for (const roomName in Game.rooms) {
-        const room = Game.rooms[roomName];
-        
-        // Skip rooms we don't own
-        if (!room.controller || !room.controller.my) continue;
+    // Process each room we control - distribute CPU load across ticks
+    const myRooms = Object.values(Game.rooms).filter(room => room.controller && room.controller.my);
+    
+    // Process rooms in different order each tick to distribute CPU load
+    const roomsToProcess = [...myRooms];
+    if (currentTick % 2 === 0) {
+        roomsToProcess.reverse();
+    }
+    
+    // Track CPU usage per room
+    if (!global.roomCpuUsage) global.roomCpuUsage = {};
+    
+    for (const room of roomsToProcess) {
+        const roomStart = Game.cpu.getUsed();
         
         // Update room intelligence once per tick
-        const roomStart = Game.cpu.getUsed();
         roomManager.updateRoomData(room);
-        global.stats.cpu.roomManagement += Game.cpu.getUsed() - roomStart;
         
         // Run defense manager - this is critical for survival
         try {
@@ -230,15 +273,19 @@ module.exports.loop = function() {
             console.log(`Error in defenseManager for room ${room.name}: ${error}`);
         }
         
-        // Handle spawning logic - throttle based on available CPU
-        if (Game.cpu.bucket > 3000 || currentTick % 3 === 0) {
+        // Distribute CPU-intensive operations across ticks based on room name hash
+        const roomHash = room.name.split('').reduce((a, b) => a + b.charCodeAt(0), 0);
+        const roomOffset = roomHash % 5; // Distribute across 5 ticks
+        
+        // Handle spawning logic - throttle based on available CPU and distribute by room
+        if (Game.cpu.bucket > 3000 || (currentTick + roomOffset) % 3 === 0) {
             const spawnStart = Game.cpu.getUsed();
             spawnManager.run(room);
             global.stats.cpu.spawning += Game.cpu.getUsed() - spawnStart;
         }
         
-        // Handle construction planning - run periodically regardless of CPU bucket
-        if (Game.cpu.bucket > 3000 || currentTick % 10 === 0) {
+        // Handle construction planning - run periodically and distribute by room
+        if (Game.cpu.bucket > 3000 || (currentTick + roomOffset) % 10 === 0) {
             const constructionStart = Game.cpu.getUsed();
             try {
                 constructionManager.run(room);
@@ -263,6 +310,23 @@ module.exports.loop = function() {
             }
             global.stats.cpu.construction += Game.cpu.getUsed() - constructionStart;
         }
+        
+        // Track CPU usage per room
+        const roomCpuUsed = Game.cpu.getUsed() - roomStart;
+        global.stats.cpu.roomManagement += roomCpuUsed;
+        
+        if (!global.roomCpuUsage[room.name]) {
+            global.roomCpuUsage[room.name] = { total: 0, ticks: 0 };
+        }
+        global.roomCpuUsage[room.name].total += roomCpuUsed;
+        global.roomCpuUsage[room.name].ticks++;
+        
+        // Log room CPU usage every 100 ticks
+        if (currentTick % 100 === 0) {
+            const avgCpu = global.roomCpuUsage[room.name].total / global.roomCpuUsage[room.name].ticks;
+            console.log(`Room ${room.name} avg CPU: ${avgCpu.toFixed(2)}`);
+            global.roomCpuUsage[room.name] = { total: 0, ticks: 0 };
+        }
     }
     
     // Run remote operations manager if CPU allows
@@ -277,20 +341,33 @@ module.exports.loop = function() {
     // Process creeps by type for better CPU batching
     const creepStart = Game.cpu.getUsed();
     
-    // Group creeps by role for more efficient processing
-    const creepsByRole = {
-        harvester: [],
-        hauler: [],
-        upgrader: [],
-        builder: []
-    };
+    // Use cached creep grouping if available for this tick
+    let creepsByRole;
     
-    // Sort creeps by role
-    for (const name in Game.creeps) {
-        const creep = Game.creeps[name];
-        if (creepsByRole[creep.memory.role]) {
-            creepsByRole[creep.memory.role].push(creep);
+    if (global.creepGroupCache && global.creepGroupCache.tick === Game.time) {
+        creepsByRole = global.creepGroupCache.groups;
+    } else {
+        // Group creeps by role for more efficient processing
+        creepsByRole = {
+            harvester: [],
+            hauler: [],
+            upgrader: [],
+            builder: []
+        };
+        
+        // Sort creeps by role
+        for (const name in Game.creeps) {
+            const creep = Game.creeps[name];
+            if (creepsByRole[creep.memory.role]) {
+                creepsByRole[creep.memory.role].push(creep);
+            }
         }
+        
+        // Cache the grouping for this tick
+        global.creepGroupCache = {
+            tick: Game.time,
+            groups: creepsByRole
+        };
     }
     
     // Process creeps by role - this allows for better CPU batching
@@ -313,7 +390,14 @@ module.exports.loop = function() {
             // Process only 1/3 of creeps each tick in emergency mode
             const startIdx = Game.time % 3;
             creepsToProcess = creeps.filter((_, idx) => idx % 3 === startIdx);
+        } else if (creeps.length > 10) {
+            // Even in normal mode, distribute very large numbers of creeps across ticks
+            const startIdx = Game.time % 2;
+            creepsToProcess = creeps.filter((_, idx) => idx % 2 === startIdx);
         }
+        
+        // Track CPU usage per role
+        const roleCpuStart = Game.cpu.getUsed();
         
         // Process the creeps with error handling
         for (const creep of creepsToProcess) {
@@ -328,6 +412,16 @@ module.exports.loop = function() {
                 }
             }
         }
+        
+        // Log CPU usage per role
+        const roleCpuUsed = Game.cpu.getUsed() - roleCpuStart;
+        if (!global.roleCpuUsage) global.roleCpuUsage = {};
+        if (!global.roleCpuUsage[priority]) {
+            global.roleCpuUsage[priority] = { total: 0, ticks: 0, creeps: 0 };
+        }
+        global.roleCpuUsage[priority].total += roleCpuUsed;
+        global.roleCpuUsage[priority].ticks++;
+        global.roleCpuUsage[priority].creeps += creepsToProcess.length;
     };
     
     // Process harvesters first as they're the foundation of the economy

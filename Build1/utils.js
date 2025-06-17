@@ -32,9 +32,14 @@ const utils = {
     
     /**
      * Clear the cache
+     * @param {boolean} preservePositions - Whether to preserve cached positions
      */
-    clearCache: function() {
+    clearCache: function(preservePositions = true) {
+        const positions = preservePositions ? this.cache.positions : undefined;
         this.cache = {};
+        if (preservePositions && positions) {
+            this.cache.positions = positions;
+        }
     },
     
     /**
@@ -155,33 +160,53 @@ const utils = {
      * @returns {boolean} - Whether the operation should proceed
      */
     shouldExecute: function(priority) {
-        // Always execute critical operations
-        if (priority === 'critical') return true;
+        // Use cached result if available (valid for current tick)
+        const cacheKey = `shouldExecute_${priority}_${Game.time}`;
+        if (this.cache[cacheKey] !== undefined) {
+            return this.cache[cacheKey];
+        }
         
-        // Check if we're in a simulation room
-        const isSimulation = Object.keys(Game.rooms).some(name => name.startsWith('sim'));
+        // Always execute critical operations
+        if (priority === 'critical') {
+            this.cache[cacheKey] = true;
+            return true;
+        }
+        
+        // Cache simulation check (valid for entire tick)
+        if (this.cache.isSimulation === undefined) {
+            this.cache.isSimulation = Object.keys(Game.rooms).some(name => name.startsWith('sim'));
+            this.cache.isSimulationTime = Game.time;
+        }
         
         // Always allow all operations in simulation rooms
-        if (isSimulation) return true;
+        if (this.cache.isSimulation) {
+            this.cache[cacheKey] = true;
+            return true;
+        }
         
         // In emergency mode, only run critical operations
         if (global.emergencyMode) {
+            let result;
             if (global.emergencyMode.level === 'critical') {
-                return priority === 'critical';
+                result = priority === 'critical';
             } else {
-                return ['critical', 'high'].includes(priority);
+                result = ['critical', 'high'].includes(priority);
             }
+            this.cache[cacheKey] = result;
+            return result;
         }
         
         // Normal mode - CPU bucket based throttling
         const bucket = Game.cpu.bucket;
+        let result;
         
-        if (bucket < 1000) return priority === 'critical';
-        if (bucket < 3000) return ['critical', 'high'].includes(priority);
-        if (bucket < 7000) return !['low'].includes(priority);
+        if (bucket < 1000) result = priority === 'critical';
+        else if (bucket < 3000) result = ['critical', 'high'].includes(priority);
+        else if (bucket < 7000) result = !['low'].includes(priority);
+        else result = true; // Full bucket, run everything
         
-        // Full bucket, run everything
-        return true;
+        this.cache[cacheKey] = result;
+        return result;
     },
 
     /**
@@ -310,20 +335,55 @@ const utils = {
         const room = Game.rooms[pos.roomName];
         if (!room) return true; // Assume safe if room not visible
         
-        const keepers = room.find(FIND_HOSTILE_CREEPS, {
-            filter: creep => creep.owner.username === 'Source Keeper'
-        });
+        // Cache keeper positions for each room (valid for 20 ticks)
+        const cacheKey = `keepers_${room.name}`;
+        if (!this.cache[cacheKey] || Game.time - this.cache[cacheKey].time > 20) {
+            const keepers = room.find(FIND_HOSTILE_CREEPS, {
+                filter: creep => creep.owner.username === 'Source Keeper'
+            });
+            
+            this.cache[cacheKey] = {
+                time: Game.time,
+                keepers: keepers.map(k => ({ id: k.id, x: k.pos.x, y: k.pos.y }))
+            };
+        }
         
-        if (keepers.length === 0) return true;
+        const cachedKeepers = this.cache[cacheKey].keepers;
+        if (cachedKeepers.length === 0) return true;
         
         // Check distance to each keeper
-        for (const keeper of keepers) {
-            if (pos.getRangeTo(keeper) <= safeDistance) {
+        for (const keeper of cachedKeepers) {
+            const distance = Math.abs(keeper.x - pos.x) + Math.abs(keeper.y - pos.y);
+            if (distance <= safeDistance) {
                 return false;
             }
         }
         
         return true;
+    },
+    
+    /**
+     * Get cached find results to avoid expensive room.find operations
+     * @param {Room} room - The room to search in
+     * @param {number} findConstant - The FIND_* constant
+     * @param {Object} options - Options for the find operation
+     * @param {number} ttl - Time to live for the cache in ticks
+     * @returns {Array} - The find results
+     */
+    cachedFind: function(room, findConstant, options = {}, ttl = 10) {
+        const cacheKey = `find_${room.name}_${findConstant}_${JSON.stringify(options)}`;
+        
+        if (this.cache[cacheKey] && Game.time - this.cache[cacheKey].time < ttl) {
+            return this.cache[cacheKey].results;
+        }
+        
+        const results = room.find(findConstant, options);
+        this.cache[cacheKey] = {
+            time: Game.time,
+            results: results
+        };
+        
+        return results;
     }
 };
 

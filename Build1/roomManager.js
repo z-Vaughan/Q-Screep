@@ -13,6 +13,11 @@ const roomManager = {
         const utils = require('utils');
         
         try {
+            // Skip if we've already processed this room this tick
+            const roomTickKey = `${room.name}_processed_${Game.time}`;
+            if (this.cache[roomTickKey]) return;
+            this.cache[roomTickKey] = true;
+            
             // Initialize cache for this room if needed
             if (!this.cache[room.name]) {
                 this.cache[room.name] = {};
@@ -24,14 +29,23 @@ const roomManager = {
                 room.memory.lastUpdate = 0;
             }
             
-            // Determine update frequency based on CPU conditions
-            let fullUpdateInterval = 20; // Default interval
+            // Determine update frequency based on CPU conditions - cache this calculation
+            const updateFreqKey = `updateFreq_${Game.time}`;
+            let fullUpdateInterval;
             
-            // Adjust interval based on emergency mode
-            if (global.emergencyMode) {
-                fullUpdateInterval = global.emergencyMode.level === 'critical' ? 100 : 50;
-            } else if (Game.cpu.bucket < 3000) {
-                fullUpdateInterval = 40;
+            if (this.cache[updateFreqKey]) {
+                fullUpdateInterval = this.cache[updateFreqKey];
+            } else {
+                fullUpdateInterval = 20; // Default interval
+                
+                // Adjust interval based on emergency mode
+                if (global.emergencyMode) {
+                    fullUpdateInterval = global.emergencyMode.level === 'critical' ? 100 : 50;
+                } else if (Game.cpu.bucket < 3000) {
+                    fullUpdateInterval = 40;
+                }
+                
+                this.cache[updateFreqKey] = fullUpdateInterval;
             }
             
             const needsFullUpdate = Game.time - room.memory.lastUpdate >= fullUpdateInterval;
@@ -145,8 +159,10 @@ const roomManager = {
      * @param {Room} room - The room to update
      */
     performFullUpdate: function(room) {
-        // Find and cache sources
-        const sources = room.find(FIND_SOURCES);
+        const utils = require('utils');
+        
+        // Find and cache sources - use cached find to reduce CPU
+        const sources = utils.cachedFind(room, FIND_SOURCES, {}, 500); // Sources don't change often
         
         // Track active sources
         const activeSources = sources.filter(source => source.energy > 0).map(source => source.id);
@@ -158,12 +174,17 @@ const roomManager = {
             room.memory.energyRequests = {};
         }
         
-        // Clean up stale energy requests
-        this.cleanupEnergyRequests(room);
-        for (const source of sources) {
-            // Count available mining positions if not already done
-            if (!room.memory.sources[source.id]) {
-                const terrain = room.getTerrain();
+        // Clean up stale energy requests - only do this every 10 ticks to save CPU
+        if (Game.time % 10 === 0) {
+            this.cleanupEnergyRequests(room);
+        }
+        
+        // Process sources that don't have data yet
+        const unprocessedSources = sources.filter(source => !room.memory.sources[source.id]);
+        if (unprocessedSources.length > 0) {
+            const terrain = room.getTerrain();
+            
+            for (const source of unprocessedSources) {
                 let availableSpots = 0;
                 
                 for (let dx = -1; dx <= 1; dx++) {
@@ -188,30 +209,35 @@ const roomManager = {
             }
         }
         
-        // Batch find operations to reduce CPU usage
-        const structures = room.find(FIND_STRUCTURES);
+        // Batch find operations to reduce CPU usage - use cached find
+        const structures = utils.cachedFind(room, FIND_STRUCTURES, {}, 20);
         
         // Find and cache construction sites
-        const sites = room.find(FIND_CONSTRUCTION_SITES);
+        const sites = utils.cachedFind(room, FIND_CONSTRUCTION_SITES, {}, 10);
         this.cache[room.name].constructionSites = sites.length;
         
         // Cache construction site IDs and details for builders
         if (sites.length > 0) {
             this.cache[room.name].constructionSiteIds = sites.map(s => s.id);
             
-            // Group by type for prioritization
-            const sitesByType = _.groupBy(sites, site => site.structureType);
-            this.cache[room.name].sitesByType = Object.keys(sitesByType).map(type => ({
-                type: type,
-                count: sitesByType[type].length
-            }));
+            // Group by type for prioritization - use cached calculation if available
+            const cacheKey = `sitesByType_${room.name}_${Game.time}`;
+            if (!this.cache[cacheKey]) {
+                const sitesByType = _.groupBy(sites, site => site.structureType);
+                this.cache[cacheKey] = Object.keys(sitesByType).map(type => ({
+                    type: type,
+                    count: sitesByType[type].length
+                }));
+            }
+            
+            this.cache[room.name].sitesByType = this.cache[cacheKey];
             
             // Log construction activity
             if (Game.time % 50 === 0 || !room.memory.lastConstructionLog || 
                 Game.time - room.memory.lastConstructionLog > 100) {
                 console.log(`Room ${room.name} construction: ${sites.length} sites - ` + 
-                    Object.keys(sitesByType).map(type => 
-                        `${sitesByType[type].length} ${type}`
+                    this.cache[room.name].sitesByType.map(site => 
+                        `${site.count} ${site.type}`
                     ).join(', '));
                 room.memory.lastConstructionLog = Game.time;
             }
@@ -220,19 +246,27 @@ const roomManager = {
             this.cache[room.name].sitesByType = [];
         }
         
-        // Find structures needing repair
-        const repairTargets = _.filter(structures, s => 
-            s.hits < s.hitsMax && s.hits < 10000
-        ).length;
-        this.cache[room.name].repairTargets = repairTargets;
+        // Find structures needing repair - cache this calculation
+        const repairCacheKey = `repairTargets_${room.name}_${Game.time}`;
+        if (!this.cache[repairCacheKey]) {
+            this.cache[repairCacheKey] = _.filter(structures, s => 
+                s.hits < s.hitsMax && s.hits < 10000
+            ).length;
+        }
         
-        // Cache energy structures for haulers
-        const energyStructures = _.filter(structures, s => 
-            (s.structureType === STRUCTURE_EXTENSION || 
-             s.structureType === STRUCTURE_SPAWN || 
-             s.structureType === STRUCTURE_TOWER)
-        ).map(s => s.id);
-        this.cache[room.name].energyStructures = energyStructures;
+        this.cache[room.name].repairTargets = this.cache[repairCacheKey];
+        
+        // Cache energy structures for haulers - cache this calculation
+        const energyStructuresCacheKey = `energyStructures_${room.name}_${Game.time}`;
+        if (!this.cache[energyStructuresCacheKey]) {
+            this.cache[energyStructuresCacheKey] = _.filter(structures, s => 
+                (s.structureType === STRUCTURE_EXTENSION || 
+                 s.structureType === STRUCTURE_SPAWN || 
+                 s.structureType === STRUCTURE_TOWER)
+            ).map(s => s.id);
+        }
+        
+        this.cache[room.name].energyStructures = this.cache[energyStructuresCacheKey];
         
         // Update timestamp
         room.memory.lastUpdate = Game.time;
@@ -243,6 +277,12 @@ const roomManager = {
      * @returns {Object} - Count of creeps by role per room
      */
     countCreepsByRole: function() {
+        // Use cached result if we've already calculated this tick
+        const cacheKey = `creepCounts_${Game.time}`;
+        if (this.cache[cacheKey]) {
+            return this.cache[cacheKey];
+        }
+        
         const counts = {};
         
         // Initialize counts for each room
@@ -272,6 +312,8 @@ const roomManager = {
             }
         }
         
+        // Cache the result for this tick
+        this.cache[cacheKey] = counts;
         return counts;
     },
     
@@ -370,10 +412,18 @@ const roomManager = {
     cleanupEnergyRequests: function(room) {
         if (!room.memory.energyRequests) return;
         
+        // Only process a subset of requests each tick to distribute CPU load
         const currentTime = Game.time;
+        const requestIds = Object.keys(room.memory.energyRequests);
+        
+        // Process at most 10 requests per call
+        const startIdx = currentTime % Math.max(1, Math.ceil(requestIds.length / 10));
+        const endIdx = Math.min(startIdx + 10, requestIds.length);
+        const requestsToProcess = requestIds.slice(startIdx, endIdx);
+        
         const requestsToDelete = [];
         
-        for (const requestId in room.memory.energyRequests) {
+        for (const requestId of requestsToProcess) {
             const request = room.memory.energyRequests[requestId];
             
             // Check if the request is stale (older than 50 ticks)
