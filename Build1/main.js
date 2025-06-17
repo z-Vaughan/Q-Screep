@@ -28,6 +28,32 @@ global.stats = {
 // Global utility functions
 global.utils = utils;
 
+// Debug function to check builder status
+global.checkBuilders = function() {
+    let builders = _.filter(Game.creeps, creep => creep.memory.role === 'builder');
+    console.log(`Found ${builders.length} builders`);
+    
+    for (let builder of builders) {
+        console.log(`Builder ${builder.name}: 
+            - Energy: ${builder.store[RESOURCE_ENERGY]}/${builder.store.getCapacity()}
+            - Building mode: ${builder.memory.building ? 'YES' : 'NO'}
+            - Target: ${builder.memory.targetId || 'none'}
+            - Energy source: ${builder.memory.energySourceId || 'none'}
+        `);
+    }
+    
+    // Check construction sites
+    for (let roomName in Game.rooms) {
+        const sites = Game.rooms[roomName].find(FIND_CONSTRUCTION_SITES);
+        console.log(`Room ${roomName} has ${sites.length} construction sites:`);
+        for (let site of sites) {
+            console.log(`- ${site.structureType} at ${site.pos.x},${site.pos.y}: ${site.progress}/${site.progressTotal}`);
+        }
+    }
+    
+    return "Builder status check complete";
+};
+
 // Special function for simulation rooms
 global.simConstruction = function() {
     for (const roomName in Game.rooms) {

@@ -8,18 +8,27 @@ const roleBuilder = {
      * @param {Creep} creep - The creep to run the role for
      */
     run: function(creep) {
+        // Initialize building state if not set
+        if (creep.memory.building === undefined) {
+            creep.memory.building = false;
+        }
+        
         // State switching with minimal operations
         if (creep.memory.building && creep.store[RESOURCE_ENERGY] === 0) {
             creep.memory.building = false;
+            creep.say('🔄 harvest');
             // Clear target cache when switching states
             delete creep.memory.targetId;
             delete creep.memory.targetPos;
+            console.log(`Builder ${creep.name} switching to harvesting mode`);
         }
         if (!creep.memory.building && creep.store.getFreeCapacity() === 0) {
             creep.memory.building = true;
+            creep.say('🚧 build');
             // Clear target cache when switching states
             delete creep.memory.energySourceId;
             delete creep.memory.sourcePos;
+            console.log(`Builder ${creep.name} switching to building mode`);
         }
         
         if (creep.memory.building) {
@@ -86,8 +95,14 @@ const roleBuilder = {
                         creep.memory.targetPos.y,
                         creep.memory.targetPos.roomName
                     ),
-                    { reusePath: 10 }
+                    { 
+                        reusePath: 10,
+                        visualizePathStyle: {stroke: '#3333ff'}
+                    }
                 );
+            } else if (actionResult !== OK) {
+                // Log errors other than distance
+                console.log(`Builder ${creep.name} error: ${actionResult} when interacting with target ${target.id}`);
             }
         }
     },
@@ -98,30 +113,30 @@ const roleBuilder = {
      * @returns {Object} - The target object
      */
     findBuildTarget: function(creep) {
+        const roomManager = require('roomManager');
         let target = null;
         
-        // Check for construction sites first
-        if (creep.room.memory.constructionSites > 0) {
-            // Use room cache if available
-            if (creep.room.memory.constructionSiteIds) {
-                for (const id of creep.room.memory.constructionSiteIds) {
-                    const site = Game.getObjectById(id);
-                    if (site) {
-                        target = site;
-                        break;
-                    }
+        // Get construction site data from room manager
+        const constructionSiteIds = roomManager.getRoomData(creep.room.name, 'constructionSiteIds');
+        
+        // Check if there are construction sites
+        if (constructionSiteIds && constructionSiteIds.length > 0) {
+            // Convert IDs to actual objects
+            const sites = [];
+            for (const id of constructionSiteIds) {
+                const site = Game.getObjectById(id);
+                if (site) {
+                    sites.push(site);
                 }
             }
             
-            // If no valid site found in cache, search for one
-            if (!target) {
-                const sites = creep.room.find(FIND_CONSTRUCTION_SITES);
-                if (sites.length > 0) {
-                    // Cache all construction site IDs for the room
-                    creep.room.memory.constructionSiteIds = sites.map(s => s.id);
-                    
-                    // Find closest site
-                    target = this.findClosestByRange(creep, sites);
+            if (sites.length > 0) {
+                // Find closest site
+                target = this.findClosestByRange(creep, sites);
+                
+                if (target) {
+                    console.log(`Builder ${creep.name} found construction site at ${target.pos.x},${target.pos.y}`);
+                    return target;
                 }
             }
         }
@@ -215,11 +230,15 @@ const roleBuilder = {
      * @returns {Object} - The energy source
      */
     findEnergySource: function(creep) {
+        const roomManager = require('roomManager');
         let source = null;
         
         // Use room's cached energy sources if available
-        if (creep.room.memory.energySources && Game.time - (creep.room.memory.energySourcesTime || 0) < 10) {
-            for (const id of creep.room.memory.energySources) {
+        const energySources = roomManager.getRoomData(creep.room.name, 'energySources');
+        const energySourcesTime = roomManager.getRoomData(creep.room.name, 'energySourcesTime');
+        
+        if (energySources && Game.time - (energySourcesTime || 0) < 10) {
+            for (const id of energySources) {
                 const potentialSource = Game.getObjectById(id);
                 if ((potentialSource && potentialSource.amount !== undefined && potentialSource.amount >= 50) || 
                     (potentialSource && potentialSource.store && potentialSource.store[RESOURCE_ENERGY] > 0)) {
@@ -252,6 +271,13 @@ const roleBuilder = {
                     
                     if (allSources.length > 0) {
                         source = this.findClosestByRange(creep, allSources);
+                        
+                        // Update room's energy sources cache
+                        if (!creep.room.memory.energySources) {
+                            creep.room.memory.energySources = [];
+                        }
+                        creep.room.memory.energySources = allSources.map(s => s.id);
+                        creep.room.memory.energySourcesTime = Game.time;
                     }
                 }
                 
@@ -296,8 +322,14 @@ const roleBuilder = {
                     creep.memory.sourcePos.y,
                     creep.memory.sourcePos.roomName
                 ),
-                { reusePath: 10 }
+                { 
+                    reusePath: 10,
+                    visualizePathStyle: {stroke: '#ffaa00'}
+                }
             );
+        } else if (actionResult !== OK) {
+            // Log errors other than distance
+            console.log(`Builder ${creep.name} error: ${actionResult} when gathering energy from ${source.id}`);
         }
     }
 };

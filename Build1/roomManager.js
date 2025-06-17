@@ -108,6 +108,17 @@ const roomManager = {
             roomMemory.energyCapacityAvailable = roomCache.energyCapacityAvailable;
             roomMemory.creepCounts = roomCache.creepCounts;
             roomMemory.priorities = roomCache.priorities;
+            
+            // Update construction data
+            if (roomCache.constructionSites !== undefined) {
+                roomMemory.constructionSites = roomCache.constructionSites;
+            }
+            if (roomCache.constructionSiteIds) {
+                roomMemory.constructionSiteIds = roomCache.constructionSiteIds;
+            }
+            if (roomCache.sitesByType) {
+                roomMemory.sitesByType = roomCache.sitesByType;
+            }
         }
         
         this.cache.memoryUpdateScheduled = false;
@@ -151,9 +162,34 @@ const roomManager = {
         // Batch find operations to reduce CPU usage
         const structures = room.find(FIND_STRUCTURES);
         
-        // Find construction sites
-        const constructionSites = room.find(FIND_CONSTRUCTION_SITES).length;
-        this.cache[room.name].constructionSites = constructionSites;
+        // Find and cache construction sites
+        const sites = room.find(FIND_CONSTRUCTION_SITES);
+        this.cache[room.name].constructionSites = sites.length;
+        
+        // Cache construction site IDs and details for builders
+        if (sites.length > 0) {
+            this.cache[room.name].constructionSiteIds = sites.map(s => s.id);
+            
+            // Group by type for prioritization
+            const sitesByType = _.groupBy(sites, site => site.structureType);
+            this.cache[room.name].sitesByType = Object.keys(sitesByType).map(type => ({
+                type: type,
+                count: sitesByType[type].length
+            }));
+            
+            // Log construction activity
+            if (Game.time % 50 === 0 || !room.memory.lastConstructionLog || 
+                Game.time - room.memory.lastConstructionLog > 100) {
+                console.log(`Room ${room.name} construction: ${sites.length} sites - ` + 
+                    Object.keys(sitesByType).map(type => 
+                        `${sitesByType[type].length} ${type}`
+                    ).join(', '));
+                room.memory.lastConstructionLog = Game.time;
+            }
+        } else {
+            this.cache[room.name].constructionSiteIds = [];
+            this.cache[room.name].sitesByType = [];
+        }
         
         // Find structures needing repair
         const repairTargets = _.filter(structures, s => 
