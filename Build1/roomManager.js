@@ -246,21 +246,39 @@ const roomManager = {
             return null;
         }
         
-        // Find sources with available spots
+        // Find source with the lowest harvester-to-capacity ratio
+        let bestSourceId = null;
+        let lowestRatio = Infinity;
+        
         for (const sourceId in room.memory.sources) {
             const sourceMemory = room.memory.sources[sourceId];
-            if (sourceMemory && sourceMemory.assignedHarvesters < sourceMemory.availableSpots) {
-                // Verify source still exists before assigning
-                const source = Game.getObjectById(sourceId);
-                if (source) {
-                    sourceMemory.assignedHarvesters++;
-                    return source;
-                } else {
-                    // Source no longer exists, clean up memory
-                    delete room.memory.sources[sourceId];
-                }
+            if (!sourceMemory || !sourceMemory.availableSpots) continue;
+            
+            // Skip sources that are already at capacity
+            if (sourceMemory.assignedHarvesters >= sourceMemory.availableSpots) continue;
+            
+            // Calculate ratio of assigned harvesters to available spots
+            const ratio = sourceMemory.assignedHarvesters / sourceMemory.availableSpots;
+            
+            // Choose source with lowest ratio (most available capacity)
+            if (ratio < lowestRatio) {
+                lowestRatio = ratio;
+                bestSourceId = sourceId;
             }
         }
+        
+        // Assign harvester to the best source
+        if (bestSourceId) {
+            const source = Game.getObjectById(bestSourceId);
+            if (source) {
+                room.memory.sources[bestSourceId].assignedHarvesters++;
+                return source;
+            } else {
+                // Source no longer exists, clean up memory
+                delete room.memory.sources[bestSourceId];
+            }
+        }
+        
         return null;
     },
     

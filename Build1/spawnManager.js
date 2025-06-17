@@ -104,11 +104,34 @@ const spawnManager = {
         const minUpgraders = 1;
         const minBuilders = (roomManager.getRoomData(room.name, 'constructionSites') || 0) > 0 ? 1 : 0;
         
+        // Calculate maximum creeps based on RCL and source count
+        const rcl = room.controller.level;
+        const maxHarvesters = sourceCount * 3;
+        const maxHaulers = sourceCount * 2;
+        const maxUpgraders = rcl <= 2 ? 2 : 3;
+        const maxBuilders = (roomManager.getRoomData(room.name, 'constructionSites') || 0) > 3 ? 2 : 1;
+        
+        // Total creep cap based on RCL
+        const maxTotalCreeps = rcl <= 2 ? 10 : 15;
+        
+        // Check if we're at total creep capacity
+        if (counts.total >= maxTotalCreeps) {
+            return null;
+        }
+        
         // Check minimum requirements in priority order
         if (counts.harvester < minHarvesters) return 'harvester';
         if (counts.hauler < minHaulers) return 'hauler';
         if (counts.upgrader < minUpgraders) return 'upgrader';
         if (counts.builder < minBuilders) return 'builder';
+        
+        // Don't spawn more than max for each role
+        if (counts.harvester >= maxHarvesters && 
+            counts.hauler >= maxHaulers && 
+            counts.upgrader >= maxUpgraders && 
+            counts.builder >= maxBuilders) {
+            return null;
+        }
         
         // Get room priorities from cache
         const priorities = roomManager.getRoomData(room.name, 'priorities') || {
@@ -117,16 +140,24 @@ const spawnManager = {
             repair: 'low'
         };
         
-        // Spawn additional creeps based on priorities
+        // Spawn additional creeps based on priorities and max limits
         const constructionSites = roomManager.getRoomData(room.name, 'constructionSites') || 0;
         const repairTargets = roomManager.getRoomData(room.name, 'repairTargets') || 0;
         
-        if (priorities.build === 'high' && constructionSites > 0) return 'builder';
-        if (priorities.upgrade === 'high') return 'upgrader';
-        if (priorities.repair === 'high' && repairTargets > 0) return 'builder';
+        if (priorities.build === 'high' && constructionSites > 0 && counts.builder < maxBuilders) {
+            return 'builder';
+        }
         
-        // Default to upgraders if we have energy to spare
-        if (room.energyAvailable >= room.energyCapacityAvailable * 0.8) {
+        if (priorities.upgrade === 'high' && counts.upgrader < maxUpgraders) {
+            return 'upgrader';
+        }
+        
+        if (priorities.repair === 'high' && repairTargets > 0 && counts.builder < maxBuilders) {
+            return 'builder';
+        }
+        
+        // Only spawn additional upgraders if we have energy to spare and below max
+        if (room.energyAvailable >= room.energyCapacityAvailable * 0.8 && counts.upgrader < maxUpgraders) {
             return 'upgrader';
         }
         
