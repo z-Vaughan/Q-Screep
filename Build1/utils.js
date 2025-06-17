@@ -40,6 +40,36 @@ const utils = {
         if (preservePositions && positions) {
             this.cache.positions = positions;
         }
+        
+        // Clean up any cache keys that were accidentally stored in Memory
+        this.cleanupMemoryCache();
+    },
+    
+    /**
+     * Clean up cache keys that were accidentally stored in Memory
+     */
+    cleanupMemoryCache: function() {
+        // List of prefixes for cache keys that should not be in Memory
+        const cacheKeyPrefixes = [
+            'shouldExecute_', 
+            'keepers_',
+            'find_',
+            '_processed_',
+            'updateFreq_',
+            'creepCounts_',
+            'sitesByType_',
+            'repairTargets_',
+            'energyStructures_'
+        ];
+        
+        // Check Memory for cache keys and remove them
+        for (const key in Memory) {
+            if (cacheKeyPrefixes.some(prefix => key.startsWith(prefix)) || 
+                key.includes('_' + Game.time) || 
+                /\d{4,}$/.test(key)) { // Keys ending with 4+ digits (likely tick numbers)
+                delete Memory[key];
+            }
+        }
     },
     
     /**

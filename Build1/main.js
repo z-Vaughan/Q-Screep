@@ -494,6 +494,10 @@ module.exports.loop = function() {
         // Clear caches periodically to prevent memory leaks
         utils.clearCache();
         spawnManager.resetCache();
+        roomManager.cleanCache();
+        
+        // Clean up any cache keys that were accidentally stored in Memory
+        utils.cleanupMemoryCache();
     }
     } catch (error) {
         errorHandler(error);
